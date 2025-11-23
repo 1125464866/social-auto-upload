@@ -4,14 +4,16 @@ import sqlite3
 import threading
 import time
 import uuid
+import requests
 from pathlib import Path
 from queue import Queue
 from flask_cors import CORS
+from datetime import datetime
 from myUtils.auth import check_cookie
 from flask import Flask, request, jsonify, Response, render_template, send_from_directory
 from conf import BASE_DIR
 from myUtils.login import get_tencent_cookie, douyin_cookie_gen, get_ks_cookie, xiaohongshu_cookie_gen
-from myUtils.postVideo import post_video_tencent, post_video_DouYin, post_video_ks, post_video_xhs
+from myUtils.postVideo import post_video_tencent, post_video_DouYin, post_video_ks, post_video_xhs, post_image_DouYin
 
 active_queues = {}
 app = Flask(__name__)
@@ -232,18 +234,26 @@ async def getValidAccounts():
         print("\n📋 当前数据表内容：")
         for row in rows:
             print(row)
+        # rows_list 结构: [id, type, filePath, userName, status]
         for row in rows_list:
-            flag = await check_cookie(row[1],row[2])
-            if not flag:
-                row[4] = 0
+            flag = await check_cookie(row[1], row[2])
+            # cookie 有效 -> status 应为 1，失效 -> 0
+            new_status = 1 if flag else 0
+            if row[4] != new_status:
+                row[4] = new_status
                 cursor.execute('''
                 UPDATE user_info 
                 SET status = ? 
                 WHERE id = ?
-                ''', (0,row[0]))
+                ''', (new_status, row[0]))
                 conn.commit()
-                print("✅ 用户状态已更新")
-        for row in rows:
+                print(f"✅ 用户 {row[3]} 状态已更新为 {new_status}")
+        # 为了打印最新结果，再查一次
+        cursor.execute('''
+        SELECT * FROM user_info''')
+        updated_rows = cursor.fetchall()
+        print("\n📋 更新后的数据表内容：")
+        for row in updated_rows:
             print(row)
         return jsonify(
                         {
@@ -628,6 +638,205 @@ def download_cookie():
         return jsonify({
             "code": 500,
             "msg": f"下载Cookie文件失败: {str(e)}",
+            "data": None
+        }), 500
+
+@app.route("/custom/api/douyin/getAccounts", methods=['GET'])
+def get_douyin_accounts():
+    """
+    获取抖音账号列表（专门给Java后端调用）
+    返回格式：{"code": 200, "data": {"data": [[id, platform, filePath, name, status], ...]}}
+    """
+    try:
+        with sqlite3.connect(Path(BASE_DIR / "db" / "database.db")) as conn:
+            cursor = conn.cursor()
+            # 先查询所有账号，然后在 Python 中过滤
+            cursor.execute('SELECT * FROM user_info')
+            rows = cursor.fetchall()
+            
+            # 过滤出抖音账号（platform = 3，索引为 1）
+            douyin_rows = [list(row) for row in rows if len(row) > 1 and row[1] == 3]
+            
+            print(f"\n📋 获取到 {len(douyin_rows)} 个抖音账号")
+            for row in douyin_rows:
+                print(f"  - ID: {row[0]}, Platform: {row[1]}, 名称: {row[3] if len(row) > 3 else 'N/A'}, 文件: {row[2] if len(row) > 2 else 'N/A'}")
+            
+            return jsonify({
+                "code": 200,
+                "msg": None,
+                "data": {
+                    "data": douyin_rows
+                }
+            }), 200
+    except Exception as e:
+        print(f"❌ 获取抖音账号列表失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "code": 500,
+            "msg": f"获取账号列表失败: {str(e)}",
+            "data": None
+        }), 500
+
+# 抖音图文发布接口
+@app.route('/custom/api/douyin/publishImage', methods=['POST'])
+def publish_douyin_image():
+    """
+    抖音图文发布接口
+    接收参数：
+    - account_file: 账号cookie文件名（不含路径）
+    - folder_path: 图片文件夹绝对路径
+    - music_name: 背景音乐名称（可选）
+    - publish_type: 发布类型 'immediate'立即发布 或 'scheduled'定时发布
+    - publish_time: 定时发布时间（格式：yyyy-mm-dd hh:mm:ss）
+    - task_id: 任务ID（用于回调更新状态）
+    - callback_url: 回调地址
+    """
+    try:
+        data = request.get_json()
+        
+        # 必填参数验证
+        account_file = data.get('account_file')
+        folder_path = data.get('folder_path')
+        task_id = data.get('task_id')
+        callback_url = data.get('callback_url')
+        
+        if not all([account_file, folder_path, task_id, callback_url]):
+            return jsonify({
+                "code": 400,
+                "msg": "缺少必填参数",
+                "data": None
+            }), 400
+        
+        # 可选参数
+        music_name = data.get('music_name', '')
+        music_type = data.get('music_type', 'search')  # search或fav
+        publish_type = data.get('publish_type', 'immediate')
+        publish_time_str = data.get('publish_time', '')
+        
+        # 验证文件夹路径
+        folder = Path(folder_path)
+        if not folder.exists() or not folder.is_dir():
+            return jsonify({
+                "code": 400,
+                "msg": "文件夹路径不存在",
+                "data": None
+            }), 400
+        
+        # 处理发布时间
+        publish_date = 0  # 默认立即发布
+        if publish_type == 'scheduled' and publish_time_str:
+            try:
+                publish_date = datetime.strptime(publish_time_str, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                return jsonify({
+                    "code": 400,
+                    "msg": "时间格式错误，应为 yyyy-mm-dd hh:mm:ss",
+                    "data": None
+                }), 400
+        
+        # 生成任务ID
+        job_id = str(uuid.uuid4())
+        
+        # 在后台线程中执行发布任务
+        def publish_task():
+            try:
+                # 调用发布函数（需要修改 post_image_DouYin 以支持直接传入文件夹路径）
+                from uploader.douyin_uploader.customMain import DouYinImage
+                from uploader.douyin_uploader.main import douyin_setup
+                from examples.upload_image_to_douyin import parse_txt_content, get_all_images
+                
+                # 获取图片文件
+                image_files = get_all_images(folder)
+                if not image_files:
+                    raise Exception("文件夹中未找到图片文件")
+                
+                # 查找txt文件
+                txt_files = list(folder.glob("*.txt"))
+                if txt_files:
+                    title, tags = parse_txt_content(txt_files[0])
+                else:
+                    title = "图文发布"
+                    tags = ["图文", "抖音"]
+                
+                # 准备图片路径列表
+                valid_images = [str(img) for img in image_files if img.exists()]
+                if len(valid_images) > 9:
+                    valid_images = valid_images[:9]
+                
+                # 账号文件路径
+                account_file_path = Path(BASE_DIR / "cookiesFile" / account_file)
+                
+                # 创建上传实例
+                douyin_image = DouYinImage(
+                    title=title,
+                    file_path=valid_images,
+                    tags=tags,
+                    publish_date=publish_date,
+                    account_file=account_file_path,
+                    productLink="",
+                    productTitle="",
+                    music_name=music_name,
+                    music_type=music_type
+                )
+                
+                # 执行上传
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(douyin_image.main())
+                loop.close()
+
+                print("抖音图文发布成功，准备回调 Java 服务...")
+
+                # 发布成功，回调通知 Java 服务
+                try:
+                    callback_response = requests.post(callback_url, json={
+                        "task_id": task_id,
+                        "status": 1,
+                        "message": "发布成功"
+                    }, timeout=10)
+                    print(f"回调成功: {callback_response.status_code}, {callback_response.text}")
+                except Exception as callback_error:
+                    print(f"回调 Java 服务失败: {str(callback_error)}")
+                    print(f"回调 URL: {callback_url}")
+                    print(f"回调数据: task_id={task_id}, status=1")
+
+            except Exception as e:
+                print(f"抖音图文发布失败: {str(e)}")
+                import traceback
+                traceback.print_exc()
+
+                # 发布失败，回调通知 Java 服务
+                try:
+                    callback_response = requests.post(callback_url, json={
+                        "task_id": task_id,
+                        "status": 2,
+                        "message": f"发布失败: {str(e)}"
+                    }, timeout=10)
+                    print(f"失败回调成功: {callback_response.status_code}, {callback_response.text}")
+                except Exception as callback_error:
+                    print(f"失败回调 Java 服务失败: {str(callback_error)}")
+                    print(f"回调 URL: {callback_url}")
+                    print(f"回调数据: task_id={task_id}, status=2")
+        
+        # 启动后台线程
+        thread = threading.Thread(target=publish_task, daemon=True)
+        thread.start()
+        
+        return jsonify({
+            "code": 200,
+            "msg": "发布任务已提交",
+            "data": {
+                "job_id": job_id,
+                "task_id": task_id
+            }
+        }), 200
+        
+    except Exception as e:
+        print(f"提交发布任务失败: {str(e)}")
+        return jsonify({
+            "code": 500,
+            "msg": f"提交发布任务失败: {str(e)}",
             "data": None
         }), 500
 

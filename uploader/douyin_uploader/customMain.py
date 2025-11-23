@@ -15,7 +15,7 @@ from utils.log import douyin_logger
 
 
 class DouYinImage(object):
-    def __init__(self, title, file_path, tags, publish_date: datetime, account_file, productLink='', productTitle='', music_name=''):
+    def __init__(self, title, file_path, tags, publish_date: datetime, account_file, productLink='', productTitle='', music_name='', music_type='search'):
         self.title = title  # 图片标题
         self.file_path = file_path  # 支持单张图片或图片列表
         self.tags = tags
@@ -26,6 +26,7 @@ class DouYinImage(object):
         self.productLink = productLink
         self.productTitle = productTitle
         self.music_name = music_name  # 背景音乐名称
+        self.music_type = music_type  # 音乐类型: search(搜索) 或 fav(收藏)
 
     async def set_schedule_time_douyin(self, page, publish_date):
         # 选择包含特定文本内容的 label 元素
@@ -51,10 +52,10 @@ class DouYinImage(object):
         else:
             await page.locator('div.progress-div [class^="upload-btn-input"]').set_input_files([self.file_path])
 
-    async def set_background_music(self, page, music_name):
+    async def set_background_music(self, page, music_name, music_type='search'):
         """设置背景音乐"""
         try:
-            douyin_logger.info(f"[-] 正在设置背景音乐: {music_name}")
+            douyin_logger.info(f"[-] 正在设置背景音乐: {music_name}, 类型: {music_type}")
             
             # 点击"选择音乐"按钮
             music_selectors = [
@@ -81,6 +82,65 @@ class DouYinImage(object):
             if not music_button_clicked:
                 douyin_logger.warning("[-] 未找到选择音乐按钮")
                 return False
+
+            # 如果是收藏音乐模式
+            if music_type == 'fav':
+                # 点击收藏标签
+                try:
+                    fav_tab = page.locator('div[data-scrollkey="fav-1-bar"]')
+                    if await fav_tab.count() > 0:
+                        await fav_tab.click()
+                        await asyncio.sleep(2)
+                        douyin_logger.info("[+] 成功点击收藏标签")
+                        
+                        # 等待音乐列表加载
+                        await asyncio.sleep(2)
+                        
+                        # 获取要选择的第几个音乐 (music_name 应该是数字字符串)
+                        try:
+                            index = int(music_name)
+                            if index < 1:
+                                index = 1
+                        except ValueError:
+                            index = 1
+                            douyin_logger.warning(f"[-] 收藏音乐序号格式错误: {music_name}，默认使用第1个")
+                        
+                        douyin_logger.info(f"[-] 正在选择第 {index} 个收藏音乐...")
+                        
+                        # 等待音乐列表容器出现
+                        music_container = page.locator('div.music-collection-container-cTsB7J')
+                        if await music_container.count() > 0:
+                            # 找到所有音乐项
+                            music_items = await music_container.locator('div.card-container-tmocjc').all()
+                            
+                            if len(music_items) >= index:
+                                target_item = music_items[index-1]  # 0-indexed
+                                
+                                # 先悬停在目标音乐项上
+                                await target_item.hover()
+                                await asyncio.sleep(1)
+                                
+                                # 寻找并点击使用按钮
+                                use_button = target_item.locator('button.apply-btn-LUPP0D:has-text("使用")')
+                                if await use_button.count() > 0:
+                                    await use_button.click()
+                                    await asyncio.sleep(2)
+                                    douyin_logger.info(f"[+] 成功选择第 {index} 个收藏音乐")
+                                    return True
+                                else:
+                                    douyin_logger.warning(f"[-] 第 {index} 个音乐项的使用按钮未找到")
+                            else:
+                                douyin_logger.warning(f"[-] 收藏音乐数量不足，只有 {len(music_items)} 个，无法选择第 {index} 个")
+                        else:
+                            douyin_logger.warning("[-] 音乐列表容器未找到")
+                            
+                        return False
+                    else:
+                        douyin_logger.warning("[-] 未找到收藏标签")
+                        return False
+                except Exception as e:
+                    douyin_logger.error(f"[-] 选择收藏音乐失败: {e}")
+                    return False
             
             # 在搜索框中输入音乐名称
             search_input = page.locator('input.semi-input[placeholder="搜索音乐"]')
@@ -94,7 +154,7 @@ class DouYinImage(object):
                 return False
             
             # 等待音乐列表加载并点击第一个音乐项的"使用"按钮
-            max_wait_attempts = 10
+            max_wait_attempts = 50
             wait_attempt = 0
             use_button_clicked = False
             
@@ -189,7 +249,7 @@ class DouYinImage(object):
             ]
             
             tab_found = False
-            for attempt in range(30):  # 最多尝试30次，每次间隔0.5秒
+            for attempt in range(60):  # 最多尝试60次，每次间隔0.5秒
                 for selector in image_text_selectors:
                     try:
                         tab_element = page.locator(selector)
@@ -315,6 +375,8 @@ class DouYinImage(object):
         # 先点击"不允许"单选按钮
         try:
             douyin_logger.info("[-] 正在点击不允许选项...")
+            
+            # 多种可能的选择器来定位"不允许"
             not_allow_selectors = [
                 'label:has-text("不允许")',
                 'label.radio-d4zkru:has-text("不允许")',
@@ -347,11 +409,32 @@ class DouYinImage(object):
 
         # 设置背景音乐
         if self.music_name:
-            await self.set_background_music(page, self.music_name)
+            await self.set_background_music(page, self.music_name, self.music_type)
 
         # 发布图片
         douyin_logger.info('[-] 正在发布图片...')
-        await page.locator('button:has-text("发布"), button:has-text("定时发布")').click()
+        # 更精确地定位发布按钮，避免匹配到页面头部的"高清发布"按钮
+        # 使用 class 属性来区分，弹窗中的发布按钮有特定的 class
+        try:
+            # 优先尝试点击定时发布按钮
+            if await page.locator('button:has-text("定时发布")').count() > 0:
+                await page.locator('button:has-text("定时发布")').click()
+                douyin_logger.info('[-] 点击了定时发布按钮')
+            else:
+                # 如果没有定时发布按钮，点击立即发布按钮
+                # 使用更精确的选择器，排除头部的"高清发布"按钮
+                publish_button = page.locator('button.button-dhlUZE:has-text("发布")')
+                if await publish_button.count() > 0:
+                    await publish_button.click()
+                    douyin_logger.info('[-] 点击了立即发布按钮')
+                else:
+                    # 如果上面的选择器也找不到，尝试使用更通用的方式
+                    await page.locator('button:has-text("发布")').last.click()
+                    douyin_logger.info('[-] 使用通用选择器点击了发布按钮')
+        except Exception as e:
+            douyin_logger.error(f'[-] 点击发布按钮失败: {str(e)}')
+            raise
+        
         await asyncio.sleep(2)
 
         # 等待发布完成
