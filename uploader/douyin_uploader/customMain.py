@@ -411,8 +411,25 @@ class DouYinImage(object):
         if self.music_name:
             await self.set_background_music(page, self.music_name, self.music_type)
 
+        # 等待图片上传完成
+        for i in range(60):  # 60 次
+            try:
+                # 查找 div，而不是 button
+                if await page.locator('div.container-eAvaPv:has-text("预览图文")').count() > 0:
+                    douyin_logger.success("[-] 图片上传成功")
+                    break
+            except Exception as e:
+                douyin_logger.info(f"[-] 检查失败，第 {i + 1}/60 次，错误: {e}")
+
+            douyin_logger.info(f"[-] 第 {i + 1}/60 次检查：未检测到“预览图文”；0.5 秒后重试...")
+            await asyncio.sleep(0.5)  # 每次睡眠 0.5 秒
+
+        else:
+            # 循环正常结束（60 次都没 break）→ 抛异常
+            raise Exception("等待 60 次仍未检测到“预览图文”按钮，图片可能未成功发布或页面结构已变化")
+
         # 发布图片
-        douyin_logger.info('[-] 正在发布图片...')
+        douyin_logger.info('[-] 正在发布...')
         # 更精确地定位发布按钮，避免匹配到页面头部的"高清发布"按钮
         # 使用 class 属性来区分，弹窗中的发布按钮有特定的 class
         try:
@@ -436,19 +453,6 @@ class DouYinImage(object):
             raise
         
         await asyncio.sleep(2)
-
-        # 等待发布完成
-        douyin_logger.info("[-] 正在等待发布完成...")
-        for _ in range(60):  # 最多等待60秒
-            try:
-                # 检查是否出现"预览图文"按钮，表示发布成功
-                if await page.locator('button:has-text("预览图文")').count() > 0:
-                    douyin_logger.success("[-] 图片发布成功")
-                    break
-            except:
-                douyin_logger.info("[-] 图片正在发布中...")
-                await page.screenshot(full_page=True)
-                await asyncio.sleep(0.5)
 
         await context.storage_state(path=self.account_file)  # 保存cookie
         douyin_logger.success('[-] cookie更新完毕！')
