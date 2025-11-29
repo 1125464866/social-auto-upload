@@ -15,10 +15,11 @@ from utils.log import douyin_logger
 
 
 class DouYinImage(object):
-    def __init__(self, title, file_path, tags, publish_date: datetime, account_file, productLink='', productTitle='', music_name='', music_type='search'):
-        self.title = title  # 图片标题
+    def __init__(self, title, file_path, tags, publish_date: datetime, account_file, description='', productLink='', productTitle='', music_name='', music_type='search'):
+        self.title = title  # 作品标题（最多30字）
+        self.description = description  # 作品描述
         self.file_path = file_path  # 支持单张图片或图片列表
-        self.tags = tags
+        self.tags = tags  # 标签列表
         self.publish_date = publish_date
         self.account_file = account_file
         self.date_format = '%Y年%m月%d日 %H:%M'
@@ -333,29 +334,51 @@ class DouYinImage(object):
                 douyin_logger.debug("[-] 等待进入发布页面...")
                 await asyncio.sleep(0.5)
 
-        # 填充标题和话题
+        # 填充标题、描述和话题
         await asyncio.sleep(1)
-        douyin_logger.info(f'[-] 正在填充标题和话题...')
+        douyin_logger.info(f'[-] 正在填充标题、描述和话题...')
         
-        # 填充标题
-        title_container = page.get_by_text('作品标题').locator("..").locator("xpath=following-sibling::div[1]").locator("input")
-        if await title_container.count():
-            await title_container.fill(self.title[:30])
+        # 填充标题（最多20字）- 等待标题输入框加载
+        title_input = page.locator('input[placeholder="添加作品标题"]')
+        for attempt in range(20):
+            if await title_input.count():
+                await title_input.fill(self.title[:20])
+                douyin_logger.info(f'[+] 已填充标题: {self.title[:20]}')
+                break
+            douyin_logger.debug(f"[-] 第 {attempt + 1} 次等待标题输入框...")
+            await asyncio.sleep(0.5)
         else:
-            titlecontainer = page.locator(".notranslate")
-            await titlecontainer.click()
-            await page.keyboard.press("Backspace")
-            await page.keyboard.press("Control+KeyA")
-            await page.keyboard.press("Delete")
-            await page.keyboard.type(self.title)
-            await page.keyboard.press("Enter")
+            douyin_logger.warning('[-] 未找到标题输入框')
         
-        # 填充话题标签
+        # 填充描述和话题标签（zone-container）
         css_selector = ".zone-container"
-        for index, tag in enumerate(self.tags, start=1):
-            await page.type(css_selector, "#" + tag)
-            await page.press(css_selector, "Space")
-            await asyncio.sleep(1)
+        # 等待描述容器出现
+        description_container = page.locator(css_selector)
+        for attempt in range(20):
+            if await description_container.count():
+                break
+            douyin_logger.debug(f"[-] 第 {attempt + 1} 次等待描述容器...")
+            await asyncio.sleep(0.5)
+        
+        if await description_container.count():
+            await description_container.click()
+            await asyncio.sleep(0.5)
+            
+            # 先填充描述内容
+            if self.description:
+                await page.keyboard.type(self.description)
+                await page.keyboard.press("Enter")
+                douyin_logger.info(f'[+] 已填充描述: {self.description[:50]}...' if len(self.description) > 50 else f'[+] 已填充描述: {self.description}')
+                await asyncio.sleep(0.5)
+            
+            # 再填充话题标签
+            for index, tag in enumerate(self.tags, start=1):
+                await page.type(css_selector, "#" + tag)
+                await page.press(css_selector, "Space")
+                await asyncio.sleep(1)
+            douyin_logger.info(f'[+] 已填充标签: {self.tags}')
+        else:
+            douyin_logger.warning('[-] 未找到描述输入容器')
 
         # 设置商品链接
         if self.productLink:

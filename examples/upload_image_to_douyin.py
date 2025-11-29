@@ -9,64 +9,110 @@ from uploader.douyin_uploader.customMain import DouYinImage
 from utils.files_times import generate_schedule_time_next_day
 
 
-def parse_txt_content(txt_file_path):
-    """解析txt文件内容：第一个#后面是标题，中间是文案描述，最后的#是标签"""
+def read_txt_file(file_path):
+    """读取txt文件内容"""
     try:
-        with open(txt_file_path, 'r', encoding='utf-8') as f:
-            content = f.read().strip()
-        
-        # 按行分割内容
-        lines = content.split('\n')
-        
-        # 查找第一个以#开头的行作为标题
-        title = "图文发布"
-        description_lines = []
-        hashtag_lines = []
-        
-        # 标记是否已经找到标题
-        title_found = False
-        # 标记是否开始收集hashtag
-        collecting_hashtags = False
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            # 如果行以#开头且还没找到标题，这就是标题
-            if line.startswith('#') and not title_found:
-                title = line[1:].strip()  # 去掉#号
-                title_found = True
-            # 如果行全部都是#开头的词（标签行）
-            elif re.match(r'^#\w+(\s+#\w+)*\s*$', line):
-                collecting_hashtags = True
-                hashtag_lines.append(line)
-            # 如果已经在收集hashtag但遇到非hashtag行，停止收集
-            elif collecting_hashtags and not line.startswith('#'):
-                break
-            # 如果已经找到标题但还没开始收集hashtag，这是描述内容
-            elif title_found and not collecting_hashtags:
-                description_lines.append(line)
-        
-        # 合并描述内容
-        description = '\n'.join(description_lines)
-        
-        # 提取所有hashtag
-        hashtag_text = ' '.join(hashtag_lines)
-        hashtag_pattern = r'#(\w+)'
-        hashtags = re.findall(hashtag_pattern, hashtag_text)
-        
-        # 组合标题和描述作为完整标题
-        if description:
-            full_title = f"{title}\n{description}"
-        else:
-            full_title = title
-            
-        return full_title, hashtags
-        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read().strip()
     except Exception as e:
-        print(f"解析txt文件失败: {e}")
-        return "图文发布", ["图文", "抖音"]
+        print(f"读取文件失败: {file_path}, 错误: {e}")
+        return None
+
+
+def parse_copywriter_content(content):
+    """解析文案内容：提取描述和标签"""
+    if not content:
+        return "", []
+    
+    lines = content.split('\n')
+    description_lines = []
+    hashtag_lines = []
+    collecting_hashtags = False
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        
+        # 如果行全部都是#开头的词（标签行）
+        if re.match(r'^#\w+(\s+#\w+)*\s*$', line):
+            collecting_hashtags = True
+            hashtag_lines.append(line)
+        # 如果已经在收集hashtag但遇到非hashtag行，停止收集
+        elif collecting_hashtags and not line.startswith('#'):
+            break
+        # 还没开始收集hashtag，这是描述内容
+        elif not collecting_hashtags:
+            description_lines.append(line)
+    
+    # 合并描述内容
+    description = '\n'.join(description_lines)
+    
+    # 提取所有hashtag
+    hashtag_text = ' '.join(hashtag_lines)
+    hashtag_pattern = r'#(\w+)'
+    hashtags = re.findall(hashtag_pattern, hashtag_text)
+    
+    return description, hashtags
+
+
+def get_title_description_tags(folder_path, override_title=None, override_copywriter=None):
+    """
+    从文件夹获取标题、描述和标签
+    优先级：传入的参数 > 文件夹中的txt文件
+    
+    Args:
+        folder_path: 文件夹路径
+        override_title: 传入的标题，如果有则优先使用
+        override_copywriter: 传入的文案，如果有则优先使用
+    
+    Returns:
+        tuple: (title, description, tags)
+    """
+    folder = Path(folder_path)
+    title = "图文发布"
+    description = ""
+    tags = ["图文", "抖音"]
+    
+    # 处理标题
+    if override_title:
+        title = override_title
+        print(f"使用传入的标题: {title}")
+    else:
+        # 从文件夹读取title.txt
+        title_file = folder / "title.txt"
+        if title_file.exists():
+            title_content = read_txt_file(title_file)
+            if title_content:
+                title = title_content[:20]  # 标题最多20字
+                print(f"从 title.txt 读取标题: {title}")
+        else:
+            print(f"未找到 title.txt，使用默认标题: {title}")
+    
+    # 处理文案和标签
+    if override_copywriter:
+        description, tags = parse_copywriter_content(override_copywriter)
+        print(f"使用传入的文案")
+        if not tags:
+            tags = ["图文", "抖音"]
+    else:
+        # 从文件夹读取copywriter.txt
+        copywriter_file = folder / "copywriter.txt"
+        if copywriter_file.exists():
+            copywriter_content = read_txt_file(copywriter_file)
+            if copywriter_content:
+                description, tags = parse_copywriter_content(copywriter_content)
+                print(f"从 copywriter.txt 读取文案")
+                if not tags:
+                    tags = ["图文", "抖音"]
+        else:
+            print(f"未找到 copywriter.txt，使用默认文案")
+    
+    print(f"最终标题: {title[:50]}..." if len(title) > 50 else f"最终标题: {title}")
+    print(f"最终描述: {description[:50]}..." if len(description) > 50 else f"最终描述: {description}")
+    print(f"最终标签: {tags}")
+    
+    return title, description, tags
 
 
 def get_all_images(folder_path):
@@ -124,21 +170,8 @@ async def main():
     print(f"找到 {len(image_files)} 张图片")
     print(f"图片文件: {[f.name for f in image_files]}")
     
-    # 查找txt文件
-    txt_files = list(folder_path.glob("*.txt"))
-    
-    if txt_files:
-        txt_file = txt_files[0]  # 使用第一个txt文件
-        print(f"使用txt文件: {txt_file.name}")
-        
-        # 解析标题和hashtag
-        title, tags = parse_txt_content(txt_file)
-        print(f"解析到的标题: {title[:50]}..." if len(title) > 50 else f"解析到的标题: {title}")
-        print(f"解析到的标签: {tags}")
-    else:
-        title = "图文发布"
-        tags = ["图文", "抖音"]
-        print(f"未找到txt文件，使用默认标题: {title}")
+    # 获取标题、描述、标签（可通过参数覆盖）
+    title, description, tags = get_title_description_tags(folder_path)
     
     # 检查图片文件是否存在
     valid_images = []
@@ -164,6 +197,7 @@ async def main():
     # 创建DouYinImage实例
     douyin_image = DouYinImage(
         title=title,
+        description=description,
         file_path=valid_images,
         tags=tags,
         publish_date=publish_datetimes[0],

@@ -709,6 +709,8 @@ def publish_douyin_image():
             }), 400
         
         # 可选参数
+        title = data.get('title', '')  # 标题（可选，留空则从文件夹读取）
+        copywriter = data.get('copywriter', '')  # 文案（可选，留空则从文件夹读取）
         music_name = data.get('music_name', '')
         music_type = data.get('music_type', 'search')  # search或fav
         publish_type = data.get('publish_type', 'immediate')
@@ -744,20 +746,19 @@ def publish_douyin_image():
                 # 调用发布函数（需要修改 post_image_DouYin 以支持直接传入文件夹路径）
                 from uploader.douyin_uploader.customMain import DouYinImage
                 from uploader.douyin_uploader.main import douyin_setup
-                from examples.upload_image_to_douyin import parse_txt_content, get_all_images
+                from examples.upload_image_to_douyin import get_title_description_tags, get_all_images
                 
                 # 获取图片文件
                 image_files = get_all_images(folder)
                 if not image_files:
                     raise Exception("文件夹中未找到图片文件")
                 
-                # 查找txt文件
-                txt_files = list(folder.glob("*.txt"))
-                if txt_files:
-                    title, tags = parse_txt_content(txt_files[0])
-                else:
-                    title = "图文发布"
-                    tags = ["图文", "抖音"]
+                # 获取标题、描述、标签（优先使用传入参数，否则从文件夹读取）
+                final_title, description, tags = get_title_description_tags(
+                    folder, 
+                    override_title=title if title else None,
+                    override_copywriter=copywriter if copywriter else None
+                )
                 
                 # 准备图片路径列表
                 valid_images = [str(img) for img in image_files if img.exists()]
@@ -769,7 +770,8 @@ def publish_douyin_image():
                 
                 # 创建上传实例
                 douyin_image = DouYinImage(
-                    title=title,
+                    title=final_title,
+                    description=description,
                     file_path=valid_images,
                     tags=tags,
                     publish_date=publish_date,
