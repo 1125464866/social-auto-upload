@@ -72,7 +72,7 @@ def get_title_description_tags(folder_path, override_title=None, override_copywr
     folder = Path(folder_path)
     title = "图文发布"
     description = ""
-    tags = ["图文", "抖音"]
+    tags = []
     
     # 处理标题
     if override_title:
@@ -94,7 +94,7 @@ def get_title_description_tags(folder_path, override_title=None, override_copywr
         description, tags = parse_copywriter_content(override_copywriter)
         print(f"使用传入的文案")
         if not tags:
-            tags = ["图文", "抖音"]
+            tags = []
     else:
         # 从文件夹读取copywriter.txt
         copywriter_file = folder / "copywriter.txt"
@@ -104,7 +104,7 @@ def get_title_description_tags(folder_path, override_title=None, override_copywr
                 description, tags = parse_copywriter_content(copywriter_content)
                 print(f"从 copywriter.txt 读取文案")
                 if not tags:
-                    tags = ["图文", "抖音"]
+                    tags = []
         else:
             print(f"未找到 copywriter.txt，使用默认文案")
     
