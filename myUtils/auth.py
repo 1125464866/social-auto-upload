@@ -19,10 +19,10 @@ async def cookie_auth_douyin(account_file):
         context = await set_init_script(context)
         # 创建一个新的页面
         page = await context.new_page()
-        # 访问指定的 URL
-        await page.goto("https://creator.douyin.com/creator-micro/content/upload")
+        # 访问指定的 URL（增加超时时间到60秒）
+        await page.goto("https://creator.douyin.com/creator-micro/content/upload", timeout=60000)
         try:
-            await page.wait_for_url("https://creator.douyin.com/creator-micro/content/upload", timeout=5000)
+            await page.wait_for_url("https://creator.douyin.com/creator-micro/content/upload", timeout=10000)
             # 2024.06.17 抖音创作者中心改版
             # 判断
             # 等待“扫码登录”元素出现，超时 5 秒（如果 5 秒没出现，说明 cookie 有效）

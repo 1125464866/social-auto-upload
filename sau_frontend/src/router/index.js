@@ -8,8 +8,8 @@ import About from '../views/About.vue'
 const routes = [
   {
     path: '/',
-    name: 'Dashboard',
-    component: Dashboard
+    name: 'AccountManagement',
+    component: AccountManagement
   },
   {
     path: '/account-management',

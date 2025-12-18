@@ -5,7 +5,7 @@
         <div class="sidebar">
           <div class="logo">
             <img v-show="isCollapse" src="/vite.svg" alt="Logo" class="logo-img">
-            <h2 v-show="!isCollapse">自媒体自动化运营系统</h2>
+            <h2 v-show="!isCollapse">玖言自媒体自动化运营系统</h2>
           </div>
           <el-menu
             :router="true"
@@ -16,30 +16,30 @@
             text-color="#fff"
             active-text-color="#409EFF"
           >
-            <el-menu-item index="/">
-              <el-icon><HomeFilled /></el-icon>
-              <span>首页</span>
-            </el-menu-item>
+<!--            <el-menu-item index="/">-->
+<!--              <el-icon><HomeFilled /></el-icon>-->
+<!--              <span>首页</span>-->
+<!--            </el-menu-item>-->
             <el-menu-item index="/account-management">
               <el-icon><User /></el-icon>
               <span>账号管理</span>
             </el-menu-item>
-            <el-menu-item index="/material-management">
-              <el-icon><Picture /></el-icon>
-              <span>素材管理</span>
-            </el-menu-item>
-            <el-menu-item index="/publish-center">
-              <el-icon><Upload /></el-icon>
-              <span>发布中心</span>
-            </el-menu-item>
-            <el-menu-item index="/website">
-              <el-icon><Monitor /></el-icon>
-              <span>网站</span>
-            </el-menu-item>
-            <el-menu-item index="/data">
-              <el-icon><DataAnalysis /></el-icon>
-              <span>数据</span>
-            </el-menu-item>
+<!--            <el-menu-item index="/material-management">-->
+<!--              <el-icon><Picture /></el-icon>-->
+<!--              <span>素材管理</span>-->
+<!--            </el-menu-item>-->
+<!--            <el-menu-item index="/publish-center">-->
+<!--              <el-icon><Upload /></el-icon>-->
+<!--              <span>发布中心</span>-->
+<!--            </el-menu-item>-->
+<!--            <el-menu-item index="/website">-->
+<!--              <el-icon><Monitor /></el-icon>-->
+<!--              <span>网站</span>-->
+<!--            </el-menu-item>-->
+<!--            <el-menu-item index="/data">-->
+<!--              <el-icon><DataAnalysis /></el-icon>-->
+<!--              <span>数据</span>-->
+<!--            </el-menu-item>-->
           </el-menu>
         </div>
       </el-aside>
