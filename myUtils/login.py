@@ -18,7 +18,7 @@ async def douyin_cookie_gen(id,status_queue, account_id=None):
             url_changed_event.set()
     async with async_playwright() as playwright:
         options = {
-            'headless': LOCAL_CHROME_HEADLESS
+            'headless': False
         }
         # Make sure to run headed.
         browser = await playwright.chromium.launch(**options)

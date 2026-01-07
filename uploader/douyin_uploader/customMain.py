@@ -208,13 +208,13 @@ class DouYinImage(object):
         if self.local_executable_path:
             context = await playwright.chromium.launch_persistent_context(
                 user_data_dir=temp_dir,
-                headless=False,
+                headless=True,
                 executable_path=self.local_executable_path
             )
         else:
             context = await playwright.chromium.launch_persistent_context(
                 user_data_dir=temp_dir,
-                headless=False
+                headless=True
             )
         
         # 加载cookie

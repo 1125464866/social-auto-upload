@@ -5,6 +5,17 @@
     </div>
     
     <div class="account-tabs">
+      <transition name="fade">
+        <div 
+          v-if="appStore.isAccountRefreshing" 
+          class="account-refresh-overlay"
+        >
+          <div class="overlay-content">
+            <el-icon class="is-loading"><Loading /></el-icon>
+            <p>正在刷新账号状态，请稍候...</p>
+          </div>
+        </div>
+      </transition>
       <el-tabs v-model="activeTab" class="account-tabs-nav">
         <!-- <el-tab-pane label="全部" name="all">
           <div class="account-list-container">
@@ -499,17 +510,10 @@ const fetchAccounts = async () => {
 }
 
 // 后台验证所有账号（优化版本，使用setTimeout避免阻塞UI）
-const validateAllAccountsInBackground = async () => {
+const validateAllAccountsInBackground = () => {
   // 使用setTimeout将验证过程放在下一个事件循环，避免阻塞UI
-  setTimeout(async () => {
-    try {
-      const res = await accountApi.getValidAccounts()
-      if (res.code === 200 && res.data) {
-        accountStore.setAccounts(res.data)
-      }
-    } catch (error) {
-      console.error('后台验证账号失败:', error)
-    }
+  setTimeout(() => {
+    fetchAccounts()
   }, 0)
 }
 
@@ -966,12 +970,44 @@ onBeforeUnmount(() => {
   }
   
   .account-tabs {
+    position: relative;
     background-color: #fff;
     border-radius: 4px;
     box-shadow: $box-shadow-light;
     
     .account-tabs-nav {
       padding: 20px;
+    }
+    
+    .account-refresh-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(2px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+
+      .overlay-content {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        color: $text-regular;
+
+        .el-icon {
+          font-size: 36px;
+          animation: rotate 1s linear infinite;
+          color: $primary-color;
+        }
+
+        p {
+          margin: 0;
+          font-size: 16px;
+        }
+      }
     }
   }
   
