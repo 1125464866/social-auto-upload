@@ -769,7 +769,7 @@ const handleReLogin = (row) => {
 
   // 立即开始登录流程
   setTimeout(() => {
-    connectSSE(row.platform, row.name)
+    connectSSE(row.platform, row.name, row.id)
   }, 300)
 }
 
@@ -791,7 +791,7 @@ const closeSSEConnection = () => {
 }
 
 // 建立SSE连接
-const connectSSE = (platform, name) => {
+const connectSSE = (platform, name, accountId = null) => {
   // 关闭可能存在的连接
   closeSSEConnection()
 
@@ -805,7 +805,12 @@ const connectSSE = (platform, name) => {
 
   // 创建SSE连接
   const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5409'
-  const url = `${baseUrl}/login?type=${type}&id=${encodeURIComponent(name)}`
+  let url = `${baseUrl}/login?type=${type}&id=${encodeURIComponent(name)}`
+  
+  // 如果有accountId，则是重新绑定，需要传递给后端
+  if (accountId) {
+    url += `&account_id=${accountId}`
+  }
 
   eventSource = new EventSource(url)
 

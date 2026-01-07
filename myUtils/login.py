@@ -10,7 +10,7 @@ from pathlib import Path
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS
 
 # 抖音登录
-async def douyin_cookie_gen(id,status_queue):
+async def douyin_cookie_gen(id,status_queue, account_id=None):
     url_changed_event = asyncio.Event()
     async def on_url_change():
         # 检查是否是主框架的变化
@@ -66,17 +66,25 @@ async def douyin_cookie_gen(id,status_queue):
         await browser.close()
         with sqlite3.connect(Path(BASE_DIR / "db" / "database.db")) as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                                INSERT INTO user_info (type, filePath, userName, status)
-                                VALUES (?, ?, ?, ?)
-                                ''', (3, f"{uuid_v1}.json", id, 1))
+            if account_id:
+                cursor.execute('''
+                    UPDATE user_info
+                    SET filePath = ?, userName = ?, status = ?
+                    WHERE id = ?
+                ''', (f"{uuid_v1}.json", id, 1, account_id))
+                print(f"✅ 用户 {id} (ID: {account_id}) 信息已更新")
+            else:
+                cursor.execute('''
+                                    INSERT INTO user_info (type, filePath, userName, status)
+                                    VALUES (?, ?, ?, ?)
+                                    ''', (3, f"{uuid_v1}.json", id, 1))
+                print("✅ 用户状态已记录")
             conn.commit()
-            print("✅ 用户状态已记录")
         status_queue.put("200")
 
 
 # 视频号登录
-async def get_tencent_cookie(id,status_queue):
+async def get_tencent_cookie(id,status_queue, account_id=None):
     url_changed_event = asyncio.Event()
     async def on_url_change():
         # 检查是否是主框架的变化
@@ -145,16 +153,24 @@ async def get_tencent_cookie(id,status_queue):
 
         with sqlite3.connect(Path(BASE_DIR / "db" / "database.db")) as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                                INSERT INTO user_info (type, filePath, userName, status)
-                                VALUES (?, ?, ?, ?)
-                                ''', (2, f"{uuid_v1}.json", id, 1))
+            if account_id:
+                cursor.execute('''
+                    UPDATE user_info
+                    SET filePath = ?, userName = ?, status = ?
+                    WHERE id = ?
+                ''', (f"{uuid_v1}.json", id, 1, account_id))
+                print(f"✅ 用户 {id} (ID: {account_id}) 信息已更新")
+            else:
+                cursor.execute('''
+                                    INSERT INTO user_info (type, filePath, userName, status)
+                                    VALUES (?, ?, ?, ?)
+                                    ''', (2, f"{uuid_v1}.json", id, 1))
+                print("✅ 用户状态已记录")
             conn.commit()
-            print("✅ 用户状态已记录")
         status_queue.put("200")
 
 # 快手登录
-async def get_ks_cookie(id,status_queue):
+async def get_ks_cookie(id,status_queue, account_id=None):
     url_changed_event = asyncio.Event()
     async def on_url_change():
         # 检查是否是主框架的变化
@@ -219,16 +235,24 @@ async def get_ks_cookie(id,status_queue):
 
         with sqlite3.connect(Path(BASE_DIR / "db" / "database.db")) as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                                        INSERT INTO user_info (type, filePath, userName, status)
-                                        VALUES (?, ?, ?, ?)
-                                        ''', (4, f"{uuid_v1}.json", id, 1))
+            if account_id:
+                cursor.execute('''
+                    UPDATE user_info
+                    SET filePath = ?, userName = ?, status = ?
+                    WHERE id = ?
+                ''', (f"{uuid_v1}.json", id, 1, account_id))
+                print(f"✅ 用户 {id} (ID: {account_id}) 信息已更新")
+            else:
+                cursor.execute('''
+                                            INSERT INTO user_info (type, filePath, userName, status)
+                                            VALUES (?, ?, ?, ?)
+                                            ''', (4, f"{uuid_v1}.json", id, 1))
+                print("✅ 用户状态已记录")
             conn.commit()
-            print("✅ 用户状态已记录")
         status_queue.put("200")
 
 # 小红书登录
-async def xiaohongshu_cookie_gen(id,status_queue):
+async def xiaohongshu_cookie_gen(id,status_queue, account_id=None):
     url_changed_event = asyncio.Event()
 
     async def on_url_change():
@@ -293,12 +317,20 @@ async def xiaohongshu_cookie_gen(id,status_queue):
 
         with sqlite3.connect(Path(BASE_DIR / "db" / "database.db")) as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                           INSERT INTO user_info (type, filePath, userName, status)
-                           VALUES (?, ?, ?, ?)
-                           ''', (1, f"{uuid_v1}.json", id, 1))
+            if account_id:
+                cursor.execute('''
+                    UPDATE user_info
+                    SET filePath = ?, userName = ?, status = ?
+                    WHERE id = ?
+                ''', (f"{uuid_v1}.json", id, 1, account_id))
+                print(f"✅ 用户 {id} (ID: {account_id}) 信息已更新")
+            else:
+                cursor.execute('''
+                               INSERT INTO user_info (type, filePath, userName, status)
+                               VALUES (?, ?, ?, ?)
+                               ''', (1, f"{uuid_v1}.json", id, 1))
+                print("✅ 用户状态已记录")
             conn.commit()
-            print("✅ 用户状态已记录")
         status_queue.put("200")
 
 # a = asyncio.run(xiaohongshu_cookie_gen(4,None))
