@@ -192,6 +192,55 @@ def get_all_files():
         }), 500
 
 
+@app.route("/checkAccountStatus", methods=['GET'])
+async def checkAccountStatus():
+    account_id = request.args.get('id')
+    if not account_id:
+        return jsonify({"code": 400, "msg": "缺少账号ID", "data": None}), 400
+
+    try:
+        with sqlite3.connect(Path(BASE_DIR / "db" / "database.db")) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM user_info WHERE id = ?', (account_id,))
+            row = cursor.fetchone()
+
+            if not row:
+                return jsonify({"code": 404, "msg": "账号不存在", "data": None}), 404
+
+            # row 结构: [id, type, filePath, userName, status]
+            row_list = list(row)
+            flag = await check_cookie(row_list[1], row_list[2])
+            
+            # cookie 有效 -> status 应为 1，失效 -> 0
+            new_status = 1 if flag else 0
+            
+            if row_list[4] != new_status:
+                cursor.execute('''
+                UPDATE user_info 
+                SET status = ? 
+                WHERE id = ?
+                ''', (new_status, account_id))
+                conn.commit()
+                print(f"✅ 用户 {row_list[3]} 状态已更新为 {new_status}")
+            
+            # 返回更新后的账号信息
+            cursor.execute('SELECT * FROM user_info WHERE id = ?', (account_id,))
+            updated_row = cursor.fetchone()
+            return jsonify({
+                "code": 200,
+                "msg": "验证成功",
+                "data": list(updated_row)
+            }), 200
+    except Exception as e:
+        print(f"验证账号状态时出错: {str(e)}")
+        return jsonify({
+            "code": 500,
+            "msg": f"验证失败: {str(e)}",
+            "data": None
+        }), 500
+
+
 @app.route("/getAccounts", methods=['GET'])
 def getAccounts():
     """快速获取所有账号信息，不进行cookie验证"""

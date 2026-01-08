@@ -25,5 +25,10 @@ export const accountApi = {
   // 删除账号
   deleteAccount(id) {
     return http.get(`/deleteAccount?id=${id}`)
+  },
+
+  // 验证单个账号状态
+  checkAccountStatus(id) {
+    return http.get(`/checkAccountStatus?id=${id}`)
   }
 }

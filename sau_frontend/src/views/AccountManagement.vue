@@ -30,9 +30,14 @@
               />
               <div class="action-buttons">
                 <el-button type="primary" @click="handleAddAccount">添加账号</el-button>
-                <el-button type="info" @click="fetchAccounts" :loading="false">
+                <el-button type="info" @click="fetchAccountsQuick" :loading="false">
                   <el-icon :class="{ 'is-loading': appStore.isAccountRefreshing }"><Refresh /></el-icon>
-                  <span v-if="appStore.isAccountRefreshing">刷新中</span>
+                  <span>刷新列表</span>
+                </el-button>
+                <el-button type="warning" @click="fetchAccounts" :loading="false">
+                  <el-icon :class="{ 'is-loading': appStore.isAccountRefreshing }"><CircleCheckFilled /></el-icon>
+                  <span v-if="appStore.isAccountRefreshing">检查中</span>
+                  <span v-else>检查所有状态</span>
                 </el-button>
               </div>
             </div>
@@ -72,6 +77,7 @@
                 </el-table-column>
                 <el-table-column label="操作">
                   <template #default="scope">
+                    <el-button size="small" type="primary" :icon="Refresh" @click="handleRefreshAccount(scope.row)">刷新</el-button>
                     <el-button size="small" @click="handleEdit(scope.row)">编辑</el-button>
                     <el-button size="small" type="primary" :icon="Download" @click="handleDownloadCookie(scope.row)">下载Cookie</el-button>
                     <el-button size="small" type="info" :icon="Upload" @click="handleUploadCookie(scope.row)">上传Cookie</el-button>
@@ -100,9 +106,14 @@
 <!--              />-->
 <!--              <div class="action-buttons">-->
 <!--                <el-button type="primary" @click="handleAddAccount">添加账号</el-button>-->
-<!--                <el-button type="info" @click="fetchAccounts" :loading="false">-->
+<!--                <el-button type="info" @click="fetchAccountsQuick" :loading="false">-->
 <!--                  <el-icon :class="{ 'is-loading': appStore.isAccountRefreshing }"><Refresh /></el-icon>-->
-<!--                  <span v-if="appStore.isAccountRefreshing">刷新中</span>-->
+<!--                  <span>刷新列表</span>-->
+<!--                </el-button>-->
+<!--                <el-button type="warning" @click="fetchAccounts" :loading="false">-->
+<!--                  <el-icon :class="{ 'is-loading': appStore.isAccountRefreshing }"><CircleCheckFilled /></el-icon>-->
+<!--                  <span v-if="appStore.isAccountRefreshing">检查中</span>-->
+<!--                  <span v-else>检查所有状态</span>-->
 <!--                </el-button>-->
 <!--              </div>-->
 <!--            </div>-->
@@ -142,6 +153,7 @@
 <!--                </el-table-column>-->
 <!--                <el-table-column label="操作">-->
 <!--                  <template #default="scope">-->
+<!--                    <el-button size="small" type="primary" :icon="Refresh" @click="handleRefreshAccount(scope.row)">刷新</el-button>-->
 <!--                    <el-button size="small" @click="handleEdit(scope.row)">编辑</el-button>-->
 <!--                    <el-button size="small" type="primary" :icon="Download" @click="handleDownloadCookie(scope.row)">下载Cookie</el-button>-->
 <!--                    <el-button size="small" type="info" :icon="Upload" @click="handleUploadCookie(scope.row)">上传Cookie</el-button>-->
@@ -170,9 +182,14 @@
               />
               <div class="action-buttons">
                 <el-button type="primary" @click="handleAddAccount">添加账号</el-button>
-                <el-button type="info" @click="fetchAccounts" :loading="false">
+                <el-button type="info" @click="fetchAccountsQuick" :loading="false">
                   <el-icon :class="{ 'is-loading': appStore.isAccountRefreshing }"><Refresh /></el-icon>
-                  <span v-if="appStore.isAccountRefreshing">刷新中</span>
+                  <span>刷新列表</span>
+                </el-button>
+                <el-button type="warning" @click="fetchAccounts" :loading="false">
+                  <el-icon :class="{ 'is-loading': appStore.isAccountRefreshing }"><CircleCheckFilled /></el-icon>
+                  <span v-if="appStore.isAccountRefreshing">检查中</span>
+                  <span v-else>检查所有状态</span>
                 </el-button>
               </div>
             </div>
@@ -212,6 +229,7 @@
                 </el-table-column>
                 <el-table-column label="操作">
                   <template #default="scope">
+                    <el-button size="small" type="primary" :icon="Refresh" @click="handleRefreshAccount(scope.row)">刷新</el-button>
                     <el-button size="small" @click="handleEdit(scope.row)">编辑</el-button>
                     <el-button size="small" type="primary" :icon="Download" @click="handleDownloadCookie(scope.row)">下载Cookie</el-button>
                     <el-button size="small" type="info" :icon="Upload" @click="handleUploadCookie(scope.row)">上传Cookie</el-button>
@@ -240,9 +258,14 @@
 <!--              />-->
 <!--              <div class="action-buttons">-->
 <!--                <el-button type="primary" @click="handleAddAccount">添加账号</el-button>-->
-<!--                <el-button type="info" @click="fetchAccounts" :loading="false">-->
+<!--                <el-button type="info" @click="fetchAccountsQuick" :loading="false">-->
 <!--                  <el-icon :class="{ 'is-loading': appStore.isAccountRefreshing }"><Refresh /></el-icon>-->
-<!--                  <span v-if="appStore.isAccountRefreshing">刷新中</span>-->
+<!--                  <span>刷新列表</span>-->
+<!--                </el-button>-->
+<!--                <el-button type="warning" @click="fetchAccounts" :loading="false">-->
+<!--                  <el-icon :class="{ 'is-loading': appStore.isAccountRefreshing }"><CircleCheckFilled /></el-icon>-->
+<!--                  <span v-if="appStore.isAccountRefreshing">检查中</span>-->
+<!--                  <span v-else>检查所有状态</span>-->
 <!--                </el-button>-->
 <!--              </div>-->
 <!--            </div>-->
@@ -282,6 +305,7 @@
 <!--                </el-table-column>-->
 <!--                <el-table-column label="操作">-->
 <!--                  <template #default="scope">-->
+<!--                    <el-button size="small" type="primary" :icon="Refresh" @click="handleRefreshAccount(scope.row)">刷新</el-button>-->
 <!--                    <el-button size="small" @click="handleEdit(scope.row)">编辑</el-button>-->
 <!--                    <el-button size="small" type="primary" :icon="Download" @click="handleDownloadCookie(scope.row)">下载Cookie</el-button>-->
 <!--                    <el-button size="small" type="info" :icon="Upload" @click="handleUploadCookie(scope.row)">上传Cookie</el-button>-->
@@ -310,9 +334,14 @@
 <!--              />-->
 <!--              <div class="action-buttons">-->
 <!--                <el-button type="primary" @click="handleAddAccount">添加账号</el-button>-->
-<!--                <el-button type="info" @click="fetchAccounts" :loading="false">-->
+<!--                <el-button type="info" @click="fetchAccountsQuick" :loading="false">-->
 <!--                  <el-icon :class="{ 'is-loading': appStore.isAccountRefreshing }"><Refresh /></el-icon>-->
-<!--                  <span v-if="appStore.isAccountRefreshing">刷新中</span>-->
+<!--                  <span>刷新列表</span>-->
+<!--                </el-button>-->
+<!--                <el-button type="warning" @click="fetchAccounts" :loading="false">-->
+<!--                  <el-icon :class="{ 'is-loading': appStore.isAccountRefreshing }"><CircleCheckFilled /></el-icon>-->
+<!--                  <span v-if="appStore.isAccountRefreshing">检查中</span>-->
+<!--                  <span v-else>检查所有状态</span>-->
 <!--                </el-button>-->
 <!--              </div>-->
 <!--            </div>-->
@@ -352,6 +381,7 @@
 <!--                </el-table-column>-->
 <!--                <el-table-column label="操作">-->
 <!--                  <template #default="scope">-->
+<!--                    <el-button size="small" type="primary" :icon="Refresh" @click="handleRefreshAccount(scope.row)">刷新</el-button>-->
 <!--                    <el-button size="small" @click="handleEdit(scope.row)">编辑</el-button>-->
 <!--                    <el-button size="small" type="primary" :icon="Download" @click="handleDownloadCookie(scope.row)">下载Cookie</el-button>-->
 <!--                    <el-button size="small" type="info" :icon="Upload" @click="handleUploadCookie(scope.row)">上传Cookie</el-button>-->
@@ -469,14 +499,7 @@ const fetchAccountsQuick = async () => {
   try {
     const res = await accountApi.getAccounts()
     if (res.code === 200 && res.data) {
-      // 将所有账号的状态暂时设为"验证中"
-      const accountsWithPendingStatus = res.data.map(account => {
-        // account[4] 是状态字段，暂时设为"验证中"
-        const updatedAccount = [...account];
-        updatedAccount[4] = '验证中'; // 临时状态
-        return updatedAccount;
-      });
-      accountStore.setAccounts(accountsWithPendingStatus);
+      accountStore.setAccounts(res.data)
     }
   } catch (error) {
     console.error('快速获取账号数据失败:', error)
@@ -521,11 +544,6 @@ const validateAllAccountsInBackground = () => {
 onMounted(() => {
   // 快速获取账号列表（不验证），立即显示
   fetchAccountsQuick()
-
-  // 在后台验证所有账号
-  setTimeout(() => {
-    validateAllAccountsInBackground()
-  }, 100) // 稍微延迟一下，让用户看到快速加载的效果
 })
 
 // 获取平台标签类型
@@ -736,8 +754,8 @@ const handleUploadCookie = (row) => {
 
       if (result.code === 200) {
         ElMessage.success('Cookie文件上传成功')
-        // 刷新账号列表以显示更新
-        fetchAccounts()
+        // 刷新该账号状态
+        handleRefreshAccount(row)
       } else {
         ElMessage.error(result.msg || 'Cookie文件上传失败')
       }
@@ -864,11 +882,19 @@ const connectSSE = (platform, name, accountId = null) => {
               duration: 0
             })
 
-            // 触发刷新操作
-            fetchAccounts().then(() => {
+            // 触发快速刷新
+            fetchAccountsQuick().then(() => {
+              // 如果是编辑（重新登录），刷新该账号状态
+              if (dialogType.value === 'edit' && accountForm.id) {
+                const updatedRow = accountStore.accounts.find(a => a.id === accountForm.id)
+                if (updatedRow) {
+                  handleRefreshAccount(updatedRow)
+                }
+              }
+              
               // 刷新完成后关闭提示
               ElMessage.closeAll()
-              ElMessage.success('账号信息已更新')
+              ElMessage.success(dialogType.value === 'edit' ? '账号状态已更新' : '新账号已添加')
             })
           }, 1000)
         }, 1000)
@@ -924,8 +950,8 @@ const submitAccountForm = () => {
             accountStore.updateAccount(accountForm.id, updatedAccount)
             ElMessage.success('更新成功')
             dialogVisible.value = false
-            // 刷新账号列表
-            fetchAccounts()
+            // 快速刷新列表以同步其他可能的变更（如平台名变化）
+            fetchAccountsQuick()
           } else {
             ElMessage.error(res.msg || '更新账号失败')
           }
@@ -938,6 +964,34 @@ const submitAccountForm = () => {
       return false
     }
   })
+}
+
+// 刷新单个账号状态
+const handleRefreshAccount = async (row) => {
+  // 设置该账号状态为验证中
+  const accountIndex = accountStore.accounts.findIndex(a => a.id === row.id)
+  if (accountIndex !== -1) {
+    accountStore.accounts[accountIndex] = {
+      ...accountStore.accounts[accountIndex],
+      status: '验证中'
+    }
+  }
+
+  try {
+    const res = await accountApi.checkAccountStatus(row.id)
+    if (res.code === 200 && res.data) {
+      // 更新该账号的数据
+      accountStore.updateAccountFromRaw(res.data)
+      ElMessage.success(`${row.name} 状态刷新成功`)
+    } else {
+      ElMessage.error(res.msg || '刷新失败')
+    }
+  } catch (error) {
+    console.error('刷新账号状态失败:', error)
+    ElMessage.error('刷新失败')
+    // 恢复状态
+    fetchAccountsQuick()
+  }
 }
 
 // 组件卸载前关闭SSE连接

@@ -17,12 +17,17 @@ export const useAccountStore = defineStore('account', () => {
   const setAccounts = (accountsData) => {
     // 转换后端返回的数据格式为前端使用的格式
     accounts.value = accountsData.map(item => {
+      let statusStr = '异常'
+      if (item[4] === 1) statusStr = '正常'
+      else if (item[4] === 0) statusStr = '异常'
+      else if (typeof item[4] === 'string') statusStr = item[4]
+
       return {
         id: item[0],
         type: item[1],
         filePath: item[2],
         name: item[3],
-        status: item[4] === 1 ? '正常' : '异常',
+        status: statusStr,
         platform: platformTypes[item[1]] || '未知',
         avatar: '/vite.svg' // 默认使用vite.svg作为头像
       }
@@ -47,6 +52,28 @@ export const useAccountStore = defineStore('account', () => {
     accounts.value = accounts.value.filter(acc => acc.id !== id)
   }
   
+  // 更新单个账号（从后端原始数据）
+  const updateAccountFromRaw = (rawItem) => {
+    const id = rawItem[0]
+    const index = accounts.value.findIndex(acc => acc.id === id)
+    if (index !== -1) {
+      let statusStr = '异常'
+      if (rawItem[4] === 1) statusStr = '正常'
+      else if (rawItem[4] === 0) statusStr = '异常'
+      else if (typeof rawItem[4] === 'string') statusStr = rawItem[4]
+
+      accounts.value[index] = {
+        ...accounts.value[index],
+        id: rawItem[0],
+        type: rawItem[1],
+        filePath: rawItem[2],
+        name: rawItem[3],
+        status: statusStr,
+        platform: platformTypes[rawItem[1]] || '未知'
+      }
+    }
+  }
+  
   // 根据平台获取账号
   const getAccountsByPlatform = (platform) => {
     return accounts.value.filter(acc => acc.platform === platform)
@@ -57,6 +84,7 @@ export const useAccountStore = defineStore('account', () => {
     setAccounts,
     addAccount,
     updateAccount,
+    updateAccountFromRaw,
     deleteAccount,
     getAccountsByPlatform
   }
