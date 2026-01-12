@@ -200,43 +200,65 @@ class DouYinImage(object):
             return False
 
     async def upload(self, playwright: Playwright) -> None:
-        # 使用 Chromium 浏览器启动一个浏览器实例
-        # 为每个实例创建独立的用户数据目录
-        temp_dir = tempfile.mkdtemp(prefix="douyin_image_browser_")
-        
-        # 使用 launch_persistent_context 来指定用户数据目录
-        if self.local_executable_path:
-            context = await playwright.chromium.launch_persistent_context(
-                user_data_dir=temp_dir,
-                headless=True,
-                executable_path=self.local_executable_path
-            )
-        else:
-            context = await playwright.chromium.launch_persistent_context(
-                user_data_dir=temp_dir,
-                headless=True
-            )
-        
-        # 加载cookie
-        if os.path.exists(self.account_file):
-            with open(self.account_file, 'r', encoding='utf-8') as f:
-                cookies = json.load(f)
-                if 'cookies' in cookies:
-                    await context.add_cookies(cookies['cookies'])
-        
-        context = await set_init_script(context)
-
-        # 创建一个新的页面
-        page = await context.new_page()
-        # 访问指定的 URL
-        await page.goto("https://creator.douyin.com/creator-micro/content/upload")
-        douyin_logger.info(f'[+]正在上传图片-------{self.title}')
-        # 等待页面跳转到指定的 URL，没进入，则自动等待到超时
-        douyin_logger.info(f'[-] 正在打开主页...')
-        await page.wait_for_url("https://creator.douyin.com/creator-micro/content/upload")
-        
-        # 点击"发布图文"选项卡
         try:
+            # 使用 Chromium 浏览器启动一个浏览器实例
+            # 为每个实例创建独立的用户数据目录
+            temp_dir = tempfile.mkdtemp(prefix="douyin_image_browser_")
+            context = None
+            if self.local_executable_path:
+                context = await playwright.chromium.launch_persistent_context(
+                    user_data_dir=temp_dir,
+                    headless=True,
+                    executable_path=self.local_executable_path
+                )
+            else:
+                context = await playwright.chromium.launch_persistent_context(
+                    user_data_dir=temp_dir,
+                    headless=True
+                )
+        
+            # 加载cookie
+            if os.path.exists(self.account_file):
+                with open(self.account_file, 'r', encoding='utf-8') as f:
+                    cookies = json.load(f)
+                    if 'cookies' in cookies:
+                        await context.add_cookies(cookies['cookies'])
+        
+            context = await set_init_script(context)
+
+            # 创建一个新的页面
+            page = await context.new_page()
+            # 访问指定的 URL
+            await page.goto("https://creator.douyin.com/creator-micro/content/upload")
+
+            # 检查是否登录（页面渲染延迟时加两级兜底）
+            try:
+                # 1. 增加等待，确保登录组件渲染
+                await page.wait_for_load_state("networkidle")
+
+                # 2. 定位“登录/注册”按钮
+                # 使用 class 包含匹配，这样即使后面的后缀变了也能搜到
+                login_btn_selector = 'div[class*="douyin_login_comp_btn"]:has-text("登录/注册")'
+                login_btn = page.locator(login_btn_selector)
+
+                # 3. 兜底定位：如果上面的失效，尝试直接匹配文字
+                fallback_text = page.get_by_text("登录/注册")
+
+                # 只要这两个定位器有一个被发现，且是可见的，就判定为未登录
+                if await login_btn.count() > 0 or await fallback_text.is_visible():
+                    douyin_logger.error('[+] 检测到“登录/注册”按钮，账号未登录')
+                    raise Exception("未登录，请先登录账号")
+
+            except Exception as e:
+                if "未登录" in str(e):
+                    raise
+                douyin_logger.debug(f"[-] 登录检测过程中捕获到异常: {e}")
+        
+            # 等待页面跳转到指定的 URL，没进入，则自动等待到超时
+            douyin_logger.info(f'[-] 正在打开主页...')
+            await page.wait_for_url("https://creator.douyin.com/creator-micro/content/upload")
+        
+            # 点击"发布图文"选项卡
             douyin_logger.info("[-] 正在寻找发布图文选项卡...")
             
             # 多种可能的选择器来定位"发布图文"
@@ -271,224 +293,237 @@ class DouYinImage(object):
                 await asyncio.sleep(0.5)
             
             if not tab_found:
-                douyin_logger.warning("[-] 未找到发布图文选项卡，继续尝试上传...")
-        except Exception as e:
-            douyin_logger.warning(f"[-] 点击发布图文选项卡失败: {e}")
-
-        # 等待上传区域出现并上传图片
-        douyin_logger.info("[-] 正在寻找图片上传区域...")
-        
-        # 寻找图片input元素
-        for attempt in range(20):  # 最多尝试20次，每次间隔0.5秒
-            try:
-                # 优先寻找accept属性包含image的input
-                image_inputs = await page.locator('input[type="file"]').all()
-                target_input = None
-                
-                for input_elem in image_inputs:
-                    accept_attr = await input_elem.get_attribute('accept')
-                    if accept_attr and 'image' in accept_attr:
-                        target_input = input_elem
-                        break
-                
-                # 如果没找到专门的图片input，使用第一个文件input
-                if not target_input and image_inputs:
-                    target_input = image_inputs[0]
-                
-                if target_input:
-                    # 上传图片文件
-                    if isinstance(self.file_path, list):
-                        await target_input.set_input_files(self.file_path)
-                    else:
-                        await target_input.set_input_files([self.file_path])
-                    
-                    douyin_logger.info("[+] 成功上传图片文件")
-                    break
-                else:
-                    douyin_logger.debug(f"[-] 第 {attempt + 1} 次尝试未找到图片input，等待0.5秒后重试...")
-                    await asyncio.sleep(0.5)
-                    
-            except Exception as e:
-                douyin_logger.debug(f"[-] 第 {attempt + 1} 次上传尝试失败: {e}")
-                await asyncio.sleep(0.5)
-        else:
-            raise Exception("未找到图片上传input元素")
-
-        # 等待页面跳转到发布页面
-        while True:
-            try:
-                # 尝试等待图文发布页面URL
-                current_url = page.url
-                if "publish" in current_url or "post" in current_url:
-                    if "media_type=image" in current_url or "type=new" in current_url:
-                        douyin_logger.info("[+] 成功进入图文发布页面!")
-                        break
-                    else:
-                        # 通用发布页面检查
-                        await page.wait_for_url("**/publish**", timeout=3000)
-                        douyin_logger.info("[+] 成功进入发布页面!")
-                        break
-                else:
-                    await asyncio.sleep(0.5)
-            except Exception:
-                douyin_logger.debug("[-] 等待进入发布页面...")
-                await asyncio.sleep(0.5)
-
-        # 填充标题、描述和话题
-        await asyncio.sleep(1)
-        douyin_logger.info(f'[-] 正在填充标题、描述和话题...')
-        
-        # 填充标题（最多20字）- 等待标题输入框加载
-        title_input = page.locator('input[placeholder="添加作品标题"]')
-        for attempt in range(20):
-            if await title_input.count():
-                await title_input.fill(self.title[:20])
-                douyin_logger.info(f'[+] 已填充标题: {self.title[:20]}')
-                break
-            douyin_logger.debug(f"[-] 第 {attempt + 1} 次等待标题输入框...")
-            await asyncio.sleep(0.5)
-        else:
-            douyin_logger.warning('[-] 未找到标题输入框')
-        
-        # 填充描述和话题标签（zone-container）
-        css_selector = ".zone-container"
-        # 等待描述容器出现
-        description_container = page.locator(css_selector)
-        for attempt in range(20):
-            if await description_container.count():
-                break
-            douyin_logger.debug(f"[-] 第 {attempt + 1} 次等待描述容器...")
-            await asyncio.sleep(0.5)
-        
-        if await description_container.count():
-            await description_container.click()
-            await asyncio.sleep(0.5)
+                douyin_logger.error("[-] 未找到发布图文选项卡")
+                raise Exception("未找到发布图文选项卡")
             
-            # 先填充描述内容
-            if self.description:
-                await page.keyboard.type(self.description)
-                await page.keyboard.press("Enter")
-                douyin_logger.info(f'[+] 已填充描述: {self.description[:50]}...' if len(self.description) > 50 else f'[+] 已填充描述: {self.description}')
-                await asyncio.sleep(0.5)
+            douyin_logger.info("[-] 成功进入发布图文流程")
             
-            # 再填充话题标签
-            for index, tag in enumerate(self.tags, start=1):
-                await page.type(css_selector, "#" + tag)
-                await page.press(css_selector, "Space")
-                await asyncio.sleep(1)
-            douyin_logger.info(f'[+] 已填充标签: {self.tags}')
-        else:
-            douyin_logger.warning('[-] 未找到描述输入容器')
-
-        # 设置商品链接
-        if self.productLink:
-            douyin_logger.info('[-] 正在设置商品链接...')
-            await page.locator('text="添加商品"').click()
-            await page.locator('input[placeholder="请输入商品链接"]').fill(self.productLink)
-            await page.locator('input[placeholder="请输入商品标题"]').fill(self.productTitle)
-            await page.locator('text="确认"').click()
-            await asyncio.sleep(2)
-
-        # 设置第三方平台同步
-        third_part_element = '[class^="info"] > [class^="semi-switch"]'
-        if await page.locator(third_part_element).count():
-            if 'semi-switch-checked' not in await page.eval_on_selector(third_part_element, 'div => div.className'):
-                await page.locator(third_part_element).locator('input.semi-switch-native-control').click()
-
-        # 先点击"不允许"单选按钮
-        try:
-            douyin_logger.info("[-] 正在点击不允许选项...")
+            # 等待上传区域出现并上传图片
+            douyin_logger.info("[-] 正在寻找图片上传区域...")
             
-            # 多种可能的选择器来定位"不允许"
-            not_allow_selectors = [
-                'label:has-text("不允许")',
-                'label.radio-d4zkru:has-text("不允许")',
-                'label:has(span:text("不允许"))',
-                'input[value="0"] + svg + span:text("不允许")'
-            ]
-            
-            not_allow_clicked = False
-            for selector in not_allow_selectors:
+            # 寻找图片input元素
+            for attempt in range(20):  # 最多尝试20次，每次间隔0.5秒
                 try:
-                    not_allow_element = page.locator(selector)
-                    if await not_allow_element.count() > 0:
-                        await not_allow_element.click()
-                        await asyncio.sleep(1)
-                        douyin_logger.info(f"[+] 成功点击不允许选项 (选择器: {selector})")
-                        not_allow_clicked = True
+                    # 优先寻找accept属性包含image的input
+                    image_inputs = await page.locator('input[type="file"]').all()
+                    target_input = None
+                    
+                    for input_elem in image_inputs:
+                        accept_attr = await input_elem.get_attribute('accept')
+                        if accept_attr and 'image' in accept_attr:
+                            target_input = input_elem
+                            break
+                    
+                    # 如果没找到专门的图片input，使用第一个文件input
+                    if not target_input and image_inputs:
+                        target_input = image_inputs[0]
+                    
+                    if target_input:
+                        # 上传图片文件
+                        if isinstance(self.file_path, list):
+                            await target_input.set_input_files(self.file_path)
+                        else:
+                            await target_input.set_input_files([self.file_path])
+                        
+                        douyin_logger.info("[+] 成功上传图片文件")
+                        break
+                    else:
+                        douyin_logger.debug(f"[-] 第 {attempt + 1} 次尝试未找到图片input，等待0.5秒后重试...")
+                        await asyncio.sleep(0.5)
+                        
+                except Exception as e:
+                    douyin_logger.debug(f"[-] 第 {attempt + 1} 次上传尝试失败: {e}")
+                    await asyncio.sleep(0.5)
+            else:
+                raise Exception("未找到图片上传input元素")
+
+            # 等待页面跳转到发布页面
+            while True:
+                try:
+                    # 尝试等待图文发布页面URL
+                    current_url = page.url
+                    if "publish" in current_url or "post" in current_url:
+                        if "media_type=image" in current_url or "type=new" in current_url:
+                            douyin_logger.info("[+] 成功进入图文发布页面!")
+                            break
+                        else:
+                            # 通用发布页面检查
+                            await page.wait_for_url("**/publish**", timeout=3000)
+                            douyin_logger.info("[+] 成功进入发布页面!")
+                            break
+                    else:
+                        await asyncio.sleep(0.5)
+                except Exception:
+                    douyin_logger.debug("[-] 等待进入发布页面...")
+                    await asyncio.sleep(0.5)
+
+            # 填充标题、描述和话题
+            await asyncio.sleep(1)
+            douyin_logger.info(f'[-] 正在填充标题、描述和话题...')
+        
+            # 填充标题（最多20字）- 等待标题输入框加载
+            title_input = page.locator('input[placeholder="添加作品标题"]')
+            for attempt in range(20):
+                if await title_input.count():
+                    await title_input.fill(self.title[:20])
+                    douyin_logger.info(f'[+] 已填充标题: {self.title[:20]}')
+                    break
+                douyin_logger.debug(f"[-] 第 {attempt + 1} 次等待标题输入框...")
+                await asyncio.sleep(0.5)
+            else:
+                douyin_logger.warning('[-] 未找到标题输入框')
+        
+            # 填充描述和话题标签（zone-container）
+            css_selector = ".zone-container"
+            # 等待描述容器出现
+            description_container = page.locator(css_selector)
+            for attempt in range(20):
+                if await description_container.count():
+                    break
+                douyin_logger.debug(f"[-] 第 {attempt + 1} 次等待描述容器...")
+                await asyncio.sleep(0.5)
+        
+            if await description_container.count():
+                await description_container.click()
+                await asyncio.sleep(0.5)
+            
+                # 先填充描述内容
+                if self.description:
+                    await page.keyboard.type(self.description)
+                    await page.keyboard.press("Enter")
+                    douyin_logger.info(f'[+] 已填充描述: {self.description[:50]}...' if len(self.description) > 50 else f'[+] 已填充描述: {self.description}')
+                    await asyncio.sleep(0.5)
+            
+                # 再填充话题标签
+                for index, tag in enumerate(self.tags, start=1):
+                    await page.type(css_selector, "#" + tag)
+                    await page.press(css_selector, "Space")
+                    await asyncio.sleep(1)
+                douyin_logger.info(f'[+] 已填充标签: {self.tags}')
+            else:
+                douyin_logger.warning('[-] 未找到描述输入容器')
+
+            # 设置商品链接
+            if self.productLink:
+                douyin_logger.info('[-] 正在设置商品链接...')
+                await page.locator('text="添加商品"').click()
+                await page.locator('input[placeholder="请输入商品链接"]').fill(self.productLink)
+                await page.locator('input[placeholder="请输入商品标题"]').fill(self.productTitle)
+                await page.locator('text="确认"').click()
+                await asyncio.sleep(2)
+
+            # 设置第三方平台同步
+            third_part_element = '[class^="info"] > [class^="semi-switch"]'
+            if await page.locator(third_part_element).count():
+                if 'semi-switch-checked' not in await page.eval_on_selector(third_part_element, 'div => div.className'):
+                    await page.locator(third_part_element).locator('input.semi-switch-native-control').click()
+
+            # 先点击"不允许"单选按钮
+            try:
+                douyin_logger.info("[-] 正在点击不允许选项...")
+                
+                # 多种可能的选择器来定位"不允许"
+                not_allow_selectors = [
+                    'label:has-text("不允许")',
+                    'label.radio-d4zkru:has-text("不允许")',
+                    'label:has(span:text("不允许"))',
+                    'input[value="0"] + svg + span:text("不允许")'
+                ]
+                
+                not_allow_clicked = False
+                for selector in not_allow_selectors:
+                    try:
+                        not_allow_element = page.locator(selector)
+                        if await not_allow_element.count() > 0:
+                            await not_allow_element.click()
+                            await asyncio.sleep(1)
+                            douyin_logger.info(f"[+] 成功点击不允许选项 (选择器: {selector})")
+                            not_allow_clicked = True
+                            break
+                    except Exception as e:
+                        douyin_logger.debug(f"[-] 不允许选项选择器 {selector} 失败: {e}")
+                        continue
+            
+                if not not_allow_clicked:
+                    douyin_logger.warning("[-] 未找到不允许选项，继续执行...")
+            except Exception as e:
+                douyin_logger.warning(f"[-] 点击不允许选项失败: {e}")
+
+            # 设置定时发布
+            if self.publish_date != 0:
+                await self.set_schedule_time_douyin(page, self.publish_date)
+
+            # 设置背景音乐
+            if self.music_name:
+                await self.set_background_music(page, self.music_name, self.music_type)
+
+            # 等待图片上传完成
+            for i in range(60):  # 60 次
+                try:
+                    # 查找 div，而不是 button
+                    if await page.locator('div.container-eAvaPv:has-text("预览图文")').count() > 0:
+                        douyin_logger.success("[-] 图片上传成功")
                         break
                 except Exception as e:
-                    douyin_logger.debug(f"[-] 不允许选项选择器 {selector} 失败: {e}")
-                    continue
-            
-            if not not_allow_clicked:
-                douyin_logger.warning("[-] 未找到不允许选项，继续执行...")
-        except Exception as e:
-            douyin_logger.warning(f"[-] 点击不允许选项失败: {e}")
+                    douyin_logger.info(f"[-] 检查失败，第 {i + 1}/60 次，错误: {e}")
 
-        # 设置定时发布
-        if self.publish_date != 0:
-            await self.set_schedule_time_douyin(page, self.publish_date)
+                douyin_logger.info(f"[-] 第 {i + 1}/60 次检查：未检测到“预览图文”；0.5 秒后重试...")
+                await asyncio.sleep(0.5)  # 每次睡眠 0.5 秒
 
-        # 设置背景音乐
-        if self.music_name:
-            await self.set_background_music(page, self.music_name, self.music_type)
-
-        # 等待图片上传完成
-        for i in range(60):  # 60 次
-            try:
-                # 查找 div，而不是 button
-                if await page.locator('div.container-eAvaPv:has-text("预览图文")').count() > 0:
-                    douyin_logger.success("[-] 图片上传成功")
-                    break
-            except Exception as e:
-                douyin_logger.info(f"[-] 检查失败，第 {i + 1}/60 次，错误: {e}")
-
-            douyin_logger.info(f"[-] 第 {i + 1}/60 次检查：未检测到“预览图文”；0.5 秒后重试...")
-            await asyncio.sleep(0.5)  # 每次睡眠 0.5 秒
-
-        else:
-            # 循环正常结束（60 次都没 break）→ 抛异常
-            raise Exception("等待 60 次仍未检测到“预览图文”按钮，图片可能未成功发布或页面结构已变化")
-
-        # 发布图片
-        douyin_logger.info('[-] 正在发布...')
-        # 更精确地定位发布按钮，避免匹配到页面头部的"高清发布"按钮
-        # 使用 class 属性来区分，弹窗中的发布按钮有特定的 class
-        try:
-            # 优先尝试点击定时发布按钮
-            if await page.locator('button:has-text("定时发布")').count() > 0:
-                await page.locator('button:has-text("定时发布")').click()
-                douyin_logger.info('[-] 点击了定时发布按钮')
             else:
-                # 如果没有定时发布按钮，点击立即发布按钮
-                # 使用更精确的选择器，排除头部的"高清发布"按钮
-                publish_button = page.locator('button.button-dhlUZE:has-text("发布")')
-                if await publish_button.count() > 0:
-                    await publish_button.click()
-                    douyin_logger.info('[-] 点击了立即发布按钮')
-                else:
-                    # 如果上面的选择器也找不到，尝试使用更通用的方式
-                    await page.locator('button:has-text("发布")').last.click()
-                    douyin_logger.info('[-] 使用通用选择器点击了发布按钮')
-        except Exception as e:
-            douyin_logger.error(f'[-] 点击发布按钮失败: {str(e)}')
-            raise
-        
-        await asyncio.sleep(2)
+                # 循环正常结束（60 次都没 break）→ 抛异常
+                raise Exception("等待 60 次仍未检测到“预览图文”按钮，图片可能未成功发布或页面结构已变化")
 
-        await context.storage_state(path=self.account_file)  # 保存cookie
-        douyin_logger.success('[-] cookie更新完毕！')
-        await asyncio.sleep(2)  # 这里延迟是为了方便眼睛直观的观看
-        # 关闭浏览器上下文
-        await context.close()
+            # 发布图片
+            douyin_logger.info('[-] 正在发布...')
+            try:
+                # 优先尝试点击定时发布按钮
+                if await page.locator('button:has-text("定时发布")').count() > 0:
+                    await page.locator('button:has-text("定时发布")').click()
+                    douyin_logger.info('[-] 点击了定时发布按钮')
+                else:
+                    publish_button = page.locator('button.button-dhlUZE:has-text("发布")')
+                    if await publish_button.count() > 0:
+                        await publish_button.click()
+                        douyin_logger.info('[-] 点击了立即发布按钮')
+                    else:
+                        await page.locator('button:has-text("发布")').last.click()
+                        douyin_logger.info('[-] 使用通用选择器点击了发布按钮')
+            except Exception as e:
+                douyin_logger.error(f'[-] 点击发布按钮失败: {str(e)}')
+                raise
         
-        # 清理临时目录
-        try:
-            if 'temp_dir' in locals() and os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir, ignore_errors=True)
-        except:
-            pass
+            # 持续监听发布成功
+            douyin_logger.info('[-] 正在等待发布结果...')
+            success = False
+            for _ in range(50):  # 10秒，每0.2秒检查一次
+                try:
+                    # 检查发布成功提示
+                    toast = page.locator('span.semi-toast-content-text:has-text("发布成功")')
+                    if await toast.count() > 0:
+                        douyin_logger.success('[+] 检测到发布成功提示！')
+                        success = True
+                        break
+                except Exception:
+                    pass
+                await asyncio.sleep(0.2)
+        
+            if not success:
+                douyin_logger.error('[-] 10秒内未检测到发布成功提示')
+                raise Exception("发布失败：10秒内未检测到成功提示")
+
+            await context.storage_state(path=self.account_file)  # 保存cookie
+            douyin_logger.success('[-] cookie更新完毕！')
+            await asyncio.sleep(2)
+        finally:
+            if context:
+                await context.close()
+            # 清理临时目录
+            try:
+                if temp_dir and os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+            except:
+                pass
 
     async def set_location(self, page: Page, location: str = ""):
         if not location:
