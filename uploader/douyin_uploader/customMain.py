@@ -208,13 +208,13 @@ class DouYinImage(object):
             if self.local_executable_path:
                 context = await playwright.chromium.launch_persistent_context(
                     user_data_dir=temp_dir,
-                    headless=True,
+                    headless=False,
                     executable_path=self.local_executable_path
                 )
             else:
                 context = await playwright.chromium.launch_persistent_context(
                     user_data_dir=temp_dir,
-                    headless=True
+                    headless=False
                 )
         
             # 加载cookie
@@ -455,7 +455,9 @@ class DouYinImage(object):
 
             # 设置背景音乐
             if self.music_name:
-                await self.set_background_music(page, self.music_name, self.music_type)
+                music_success = await self.set_background_music(page, self.music_name, self.music_type)
+                if not music_success:
+                    raise Exception("设置背景音乐失败：未找到可用的音乐元素")
 
             # 等待图片上传完成
             for i in range(60):  # 60 次
