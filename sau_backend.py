@@ -1,6 +1,9 @@
 import asyncio
+import json
 import os
+import shutil
 import sqlite3
+import tempfile
 import threading
 import time
 import uuid
@@ -9,11 +12,13 @@ from pathlib import Path
 from queue import Queue
 from flask_cors import CORS
 from datetime import datetime
+from playwright.async_api import async_playwright
 from myUtils.auth import check_cookie
 from flask import Flask, request, jsonify, Response, render_template, send_from_directory
-from conf import BASE_DIR
+from conf import BASE_DIR, LOCAL_CHROME_PATH
 from myUtils.login import get_tencent_cookie, douyin_cookie_gen, get_ks_cookie, xiaohongshu_cookie_gen
 from myUtils.postVideo import post_video_tencent, post_video_DouYin, post_video_ks, post_video_xhs, post_image_DouYin
+from utils.base_social_media import set_init_script
 
 active_queues = {}
 app = Flask(__name__)
@@ -23,6 +28,120 @@ CORS(app)
 
 # 限制上传文件大小为160MB
 app.config['MAX_CONTENT_LENGTH'] = 160 * 1024 * 1024
+
+
+async def open_douyin_creator_center(cookie_file_path: str):
+    temp_dir = tempfile.mkdtemp(prefix="douyin_creator_center_")
+    context = None
+    try:
+        async with async_playwright() as playwright:
+            launch_kwargs = {
+                "user_data_dir": temp_dir,
+                "headless": False
+            }
+            if LOCAL_CHROME_PATH:
+                launch_kwargs["executable_path"] = LOCAL_CHROME_PATH
+
+            context = await playwright.chromium.launch_persistent_context(**launch_kwargs)
+            context = await set_init_script(context)
+
+            if os.path.exists(cookie_file_path):
+                try:
+                    with open(cookie_file_path, 'r', encoding='utf-8') as f:
+                        state = json.load(f)
+                    if 'cookies' in state:
+                        await context.add_cookies(state['cookies'])
+                except Exception as cookie_error:
+                    print(f"加载Cookie失败: {cookie_error}")
+
+            page = await context.new_page()
+            try:
+                await page.goto(
+                    "https://creator.douyin.com/creator-micro/interactive/comment",
+                    wait_until="domcontentloaded",
+                    timeout=60000
+                )
+            except Exception as nav_error:
+                print(f"打开抖音创作者中心页面导航失败: {nav_error}")
+
+            print("抖音创作者中心页面已打开，等待用户手动关闭窗口…")
+            await page.wait_for_event("close", timeout=0)
+            print("用户已关闭抖音创作者中心窗口")
+    except Exception as e:
+        print(f"打开抖音创作者中心失败: {e}")
+    finally:
+        if context:
+            try:
+                await context.close()
+            except Exception as close_error:
+                print(f"关闭浏览器上下文失败: {close_error}")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def launch_open_douyin_creator_center(cookie_file_path: str):
+    def _target():
+        try:
+            asyncio.run(open_douyin_creator_center(cookie_file_path))
+        except Exception as e:
+            print(f"打开创作者中心任务执行失败: {e}")
+
+    threading.Thread(target=_target, daemon=True).start()
+
+
+@app.route('/openDouyinCreatorCenter', methods=['POST'])
+def open_douyin_creator_center_api():
+    try:
+        payload = request.get_json(silent=True) or {}
+        account_id = payload.get('id')
+        if not account_id:
+            return jsonify({
+                "code": 400,
+                "msg": "缺少账号ID",
+                "data": None
+            }), 400
+
+        with sqlite3.connect(Path(BASE_DIR / "db" / "database.db")) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('SELECT filePath, type FROM user_info WHERE id = ?', (account_id,))
+            row = cursor.fetchone()
+
+        if not row:
+            return jsonify({
+                "code": 404,
+                "msg": "账号不存在",
+                "data": None
+            }), 404
+
+        if row[1] != 3:
+            return jsonify({
+                "code": 400,
+                "msg": "仅支持抖音账号打开创作者中心",
+                "data": None
+            }), 400
+
+        cookie_file_path = Path(BASE_DIR / "cookiesFile" / row[0])
+        if not cookie_file_path.exists():
+            return jsonify({
+                "code": 404,
+                "msg": "Cookie文件不存在，请先登录账号",
+                "data": None
+            }), 404
+
+        launch_open_douyin_creator_center(str(cookie_file_path))
+        return jsonify({
+            "code": 200,
+            "msg": "已启动浏览器并尝试打开抖音创作者中心",
+            "data": None
+        }), 200
+
+    except Exception as e:
+        print(f"openDouyinCreatorCenter 接口异常: {e}")
+        return jsonify({
+            "code": 500,
+            "msg": f"打开创作者中心失败: {e}",
+            "data": None
+        }), 500
 
 # 获取当前目录（假设 index.html 和 assets 在这里）
 current_dir = os.path.dirname(os.path.abspath(__file__))

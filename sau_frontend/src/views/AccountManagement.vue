@@ -230,9 +230,10 @@
                 <el-table-column label="操作">
                   <template #default="scope">
                     <el-button size="small" type="primary" :icon="Refresh" @click="handleRefreshAccount(scope.row)">刷新</el-button>
+                    <el-button size="small" type="success" :icon="Monitor" @click="handleOpenCreatorCenter(scope.row)">打开创作者中心</el-button>
                     <el-button size="small" @click="handleEdit(scope.row)">编辑</el-button>
-                    <el-button size="small" type="primary" :icon="Download" @click="handleDownloadCookie(scope.row)">下载Cookie</el-button>
-                    <el-button size="small" type="info" :icon="Upload" @click="handleUploadCookie(scope.row)">上传Cookie</el-button>
+                    <!-- <el-button size="small" type="primary" :icon="Download" @click="handleDownloadCookie(scope.row)">下载Cookie</el-button>
+                    <el-button size="small" type="info" :icon="Upload" @click="handleUploadCookie(scope.row)">上传Cookie</el-button> -->
                     <el-button size="small" type="danger" @click="handleDelete(scope.row)">删除</el-button>
                   </template>
                 </el-table-column>
@@ -469,7 +470,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
-import { Refresh, CircleCheckFilled, CircleCloseFilled, Download, Upload, Loading } from '@element-plus/icons-vue'
+import { Refresh, CircleCheckFilled, CircleCloseFilled, Download, Upload, Loading, Monitor } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { accountApi } from '@/api/account'
 import { useAccountStore } from '@/stores/account'
@@ -966,10 +967,35 @@ const submitAccountForm = () => {
   })
 }
 
+// 打开抖音创作者中心
+const handleOpenCreatorCenter = async (row) => {
+  try {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5409'
+    const response = await fetch(`${baseUrl}/openDouyinCreatorCenter`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ id: row.id })
+    })
+
+    const result = await response.json()
+    if (response.ok && result.code === 200) {
+      ElMessage.success(result.msg || '已尝试打开抖音创作者中心')
+    } else {
+      ElMessage.error(result.msg || '打开抖音创作者中心失败')
+    }
+  } catch (error) {
+    console.error('打开抖音创作者中心失败:', error)
+    ElMessage.error('打开抖音创作者中心失败')
+  }
+}
+
 // 刷新单个账号状态
 const handleRefreshAccount = async (row) => {
   // 设置该账号状态为验证中
   const accountIndex = accountStore.accounts.findIndex(a => a.id === row.id)
+
   if (accountIndex !== -1) {
     accountStore.accounts[accountIndex] = {
       ...accountStore.accounts[accountIndex],
