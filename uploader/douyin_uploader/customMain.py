@@ -449,15 +449,15 @@ class DouYinImage(object):
             except Exception as e:
                 douyin_logger.warning(f"[-] 点击不允许选项失败: {e}")
 
-            # 设置定时发布
-            if self.publish_date != 0:
-                await self.set_schedule_time_douyin(page, self.publish_date)
-
             # 设置背景音乐
             if self.music_name:
                 music_success = await self.set_background_music(page, self.music_name, self.music_type)
                 if not music_success:
                     raise Exception("设置背景音乐失败：未找到可用的音乐元素")
+
+            # 设置定时发布
+            if self.publish_date != 0:
+                await self.set_schedule_time_douyin(page, self.publish_date)
 
             # 等待图片上传完成
             for i in range(60):  # 60 次
