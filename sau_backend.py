@@ -912,6 +912,13 @@ def publish_douyin_image():
         
         # 在后台线程中执行发布任务
         def publish_task():
+            # 预先计算发布时间，确保在所有回调中都能使用
+            if publish_type == 'scheduled' and publish_time_str:
+                dy_push_time = publish_time_str
+            else:
+                # 立即发布，使用当前时间
+                dy_push_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
             try:
                 # 调用发布函数（需要修改 post_image_DouYin 以支持直接传入文件夹路径）
                 from uploader.douyin_uploader.customMain import DouYinImage
@@ -965,7 +972,8 @@ def publish_douyin_image():
                     callback_response = requests.post(callback_url, json={
                         "task_id": task_id,
                         "status": 1,
-                        "message": "发布成功"
+                        "message": "发布成功",
+                        "dyPushTime": dy_push_time
                     }, timeout=10)
                     print(f"回调成功: {callback_response.status_code}, {callback_response.text}")
                 except Exception as callback_error:
@@ -983,7 +991,8 @@ def publish_douyin_image():
                     callback_response = requests.post(callback_url, json={
                         "task_id": task_id,
                         "status": 2,
-                        "message": f"发布失败: {str(e)}"
+                        "message": f"发布失败: {str(e)}",
+                        "dyPushTime": dy_push_time
                     }, timeout=10)
                     print(f"失败回调成功: {callback_response.status_code}, {callback_response.text}")
                 except Exception as callback_error:
