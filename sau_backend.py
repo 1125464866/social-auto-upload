@@ -12,7 +12,17 @@ from pathlib import Path
 from queue import Queue
 from flask_cors import CORS
 from datetime import datetime
-from playwright.async_api import async_playwright
+
+# 尝试使用 patchright，如果不存在则回退到 playwright
+try:
+    from patchright.async_api import async_playwright
+    USE_PATCHRIGHT = True
+    print("[INFO] 使用 patchright 模式（反检测增强）")
+except ImportError:
+    from playwright.async_api import async_playwright
+    USE_PATCHRIGHT = False
+    print("[WARNING] 未安装 patchright，使用普通 playwright 模式")
+
 from myUtils.auth import check_cookie
 from flask import Flask, request, jsonify, Response, render_template, send_from_directory
 from conf import BASE_DIR, LOCAL_CHROME_PATH
@@ -31,12 +41,20 @@ app.config['MAX_CONTENT_LENGTH'] = 160 * 1024 * 1024
 
 
 async def open_douyin_creator_center(cookie_file_path: str):
-    temp_dir = tempfile.mkdtemp(prefix="douyin_creator_center_")
+    """打开抖音创作者中心，使用固定的用户数据目录"""
+    # 从 cookie 文件路径提取账号名
+    cookie_filename = Path(cookie_file_path).stem  # 获取文件名（不含扩展名）
+    # 使用固定的用户数据目录
+    user_data_dir = Path(BASE_DIR) / "browser_data" / f"douyin_{cookie_filename}"
+    user_data_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"[INFO] 使用浏览器数据目录: {user_data_dir}")
+
     context = None
     try:
         async with async_playwright() as playwright:
             launch_kwargs = {
-                "user_data_dir": temp_dir,
+                "user_data_dir": str(user_data_dir),
                 "headless": False
             }
             if LOCAL_CHROME_PATH:
@@ -45,16 +63,32 @@ async def open_douyin_creator_center(cookie_file_path: str):
             context = await playwright.chromium.launch_persistent_context(**launch_kwargs)
             context = await set_init_script(context)
 
+            # 加载 cookie
             if os.path.exists(cookie_file_path):
                 try:
                     with open(cookie_file_path, 'r', encoding='utf-8') as f:
                         state = json.load(f)
                     if 'cookies' in state:
                         await context.add_cookies(state['cookies'])
+                        print(f"[INFO] 已加载 Cookie 文件: {cookie_file_path}")
                 except Exception as cookie_error:
-                    print(f"加载Cookie失败: {cookie_error}")
+                    print(f"[ERROR] 加载Cookie失败: {cookie_error}")
 
             page = await context.new_page()
+
+            # 定义页面关闭时的处理函数
+            async def on_page_close():
+                """页面关闭时保存 Cookie"""
+                try:
+                    await context.storage_state(path=cookie_file_path)
+                    print(f"[INFO] Cookie 已自动保存到: {cookie_file_path}")
+                except Exception as e:
+                    # persistent_context 会自动保存到 user_data_dir，所以这里只是补充保存
+                    print(f"[INFO] 浏览器数据已自动保存到目录: {user_data_dir}")
+
+            # 监听页面关闭事件
+            page.on("close", lambda: asyncio.create_task(on_page_close()))
+
             try:
                 await page.goto(
                     "https://creator.douyin.com/creator-micro/interactive/comment",
@@ -62,20 +96,28 @@ async def open_douyin_creator_center(cookie_file_path: str):
                     timeout=60000
                 )
             except Exception as nav_error:
-                print(f"打开抖音创作者中心页面导航失败: {nav_error}")
+                print(f"[ERROR] 打开抖音创作者中心页面导航失败: {nav_error}")
 
-            print("抖音创作者中心页面已打开，等待用户手动关闭窗口…")
+            print("[INFO] 抖音创作者中心页面已打开")
+            print(f"[INFO] 浏览器数据会自动保存到: {user_data_dir}")
+            print("[INFO] 关闭窗口后请等待几秒让数据保存完成...")
+
+            # 等待页面关闭
             await page.wait_for_event("close", timeout=0)
-            print("用户已关闭抖音创作者中心窗口")
+            print("[INFO] 用户已关闭抖音创作者中心窗口")
+
+            # 给一点时间让数据保存完成
+            await asyncio.sleep(1)
+
     except Exception as e:
-        print(f"打开抖音创作者中心失败: {e}")
+        print(f"[ERROR] 打开抖音创作者中心失败: {e}")
     finally:
         if context:
             try:
                 await context.close()
             except Exception as close_error:
-                print(f"关闭浏览器上下文失败: {close_error}")
-        shutil.rmtree(temp_dir, ignore_errors=True)
+                pass  # context 可能已关闭，忽略错误
+        print(f"[INFO] 浏览器状态已保存，下次打开将自动恢复登录状态")
 
 
 def launch_open_douyin_creator_center(cookie_file_path: str):

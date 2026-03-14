@@ -1,21 +1,32 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime
+import random
 
-from playwright.async_api import Playwright, async_playwright, Page
+# 尝试使用 patchright，如果不存在则回退到 playwright
+try:
+    from patchright.async_api import Playwright, async_playwright, Page
+    douyin_logger_patchright = True
+except ImportError:
+    from playwright.async_api import Playwright, async_playwright, Page
+    douyin_logger_patchright = False
+
 import os
 import asyncio
 from pathlib import Path
-import tempfile
 import json
-import shutil
 
-from conf import LOCAL_CHROME_PATH
+from conf import LOCAL_CHROME_PATH, BASE_DIR
 from utils.base_social_media import set_init_script
 from utils.log import douyin_logger
 
 
+def random_sleep(min_sec=0.5, max_sec=2.0):
+    """随机延迟，模拟人类操作"""
+    return asyncio.sleep(random.uniform(min_sec, max_sec))
+
+
 class DouYinImage(object):
-    def __init__(self, title, file_path, tags, publish_date: datetime, account_file, description='', productLink='', productTitle='', music_name='', music_type='search'):
+    def __init__(self, title, file_path, tags, publish_date: datetime, account_file, description='', productLink='', productTitle='', music_name='', music_type='search', comment=''):
         self.title = title  # 作品标题（最多30字）
         self.description = description  # 作品描述
         self.file_path = file_path  # 支持单张图片或图片列表
@@ -28,6 +39,8 @@ class DouYinImage(object):
         self.productTitle = productTitle
         self.music_name = music_name  # 背景音乐名称
         self.music_type = music_type  # 音乐类型: search(搜索) 或 fav(收藏)
+        self.comment = comment  # 发布后要评论的内容
+        self.work_url = None  # 发布成功后保存作品URL
 
     async def set_schedule_time_douyin(self, page, publish_date):
         # 选择包含特定文本内容的 label 元素
@@ -44,6 +57,341 @@ class DouYinImage(object):
         await page.keyboard.press("Enter")
 
         await asyncio.sleep(1)
+
+    async def get_work_url_from_manage_page(self, page):
+        """从作品管理页面获取刚发布的作品URL"""
+        try:
+            douyin_logger.info('[-] 正在获取刚发布的作品URL...')
+
+            # 等待10秒后刷新页面
+            await asyncio.sleep(10)
+            douyin_logger.info('[-] 刷新页面...')
+            await page.reload()
+            await asyncio.sleep(3)
+
+            # 循环等待并点击第一个作品封面区域，最多等待20秒
+            video_cover_found = False
+            for i in range(20):
+                video_cover = page.locator('div.video-card-cover-xx9wyS').first
+                if await video_cover.count() > 0:
+                    await video_cover.click()
+                    douyin_logger.info(f'[+] 第{i+1}次尝试，成功点击第一个作品封面')
+                    video_cover_found = True
+                    break
+                else:
+                    douyin_logger.info(f'[-] 第{i+1}/20次尝试，未找到作品封面，1秒后重试...')
+                    await asyncio.sleep(1)
+
+            if video_cover_found:
+                await asyncio.sleep(2)
+
+                # 循环等待iframe加载，最多等待20秒
+                for i in range(20):
+                    # 获取iframe_wrapper的HTML内容
+                    iframe_wrapper = page.locator('div.iframe-wrapper-Y9kFxO').first
+                    if await iframe_wrapper.count() > 0:
+                        wrapper_html = await iframe_wrapper.inner_html()
+                        douyin_logger.info(f'[DEBUG] 第{i+1}次尝试 - iframe_wrapper HTML: {wrapper_html[:500]}')
+
+                        # 从HTML内容中直接提取作品ID
+                        import re
+                        match = re.search(r'creatorvideo/(\d+)', wrapper_html)
+                        if match:
+                            work_id = match.group(1)
+                            self.work_url = f"https://www.douyin.com/note/{work_id}"
+                            douyin_logger.success(f'[+] 成功获取作品URL: {self.work_url}')
+
+                            # 如果有评论内容，跳转到创作者中心评论管理页面发布评论
+                            if self.comment:
+                                douyin_logger.info('[-] 正在跳转到创作者中心评论管理页面...')
+                                await page.goto("https://creator.douyin.com/creator-micro/interactive/comment")
+                                await asyncio.sleep(3)
+
+                                # 查找评论输入框 - 15秒检测时长，每秒检测一次
+                                douyin_logger.info('[-] 正在查找评论输入框...')
+                                comment_input_found = False
+                                for i in range(15):
+                                    try:
+                                        comment_input = page.locator('div.input-d24X73[contenteditable="true"]').first
+                                        if await comment_input.count() > 0:
+                                            # 点击输入框获取焦点
+                                            await comment_input.click()
+                                            await asyncio.sleep(0.5)
+                                            douyin_logger.info(f'[+] 第{i+1}次尝试，成功点击评论输入框')
+                                            comment_input_found = True
+                                            break
+                                    except Exception as e:
+                                        douyin_logger.debug(f'[-] 第{i+1}次点击评论输入框失败: {e}')
+                                    await asyncio.sleep(1)
+
+                                if comment_input_found:
+                                    # 输入评论内容
+                                    await page.keyboard.type(self.comment)
+                                    douyin_logger.info(f'[+] 已输入评论内容: {self.comment}')
+                                    await asyncio.sleep(0.5)
+
+                                    # 点击发送按钮 - 15秒检测时长，每秒检测一次
+                                    douyin_logger.info('[-] 正在查找发送按钮...')
+                                    send_btn_found = False
+                                    for i in range(15):
+                                        try:
+                                            send_btn = page.locator('button.douyin-creator-interactive-button:has-text("发送")').first
+                                            if await send_btn.count() > 0:
+                                                await send_btn.click()
+                                                douyin_logger.info(f'[+] 第{i+1}次尝试，成功点击发送按钮')
+                                                send_btn_found = True
+                                                break
+                                        except Exception as e:
+                                            douyin_logger.debug(f'[-] 第{i+1}次点击发送按钮失败: {e}')
+                                        await asyncio.sleep(1)
+
+                                    if send_btn_found:
+                                        await asyncio.sleep(2)
+                                        douyin_logger.success('[+] 评论发布成功')
+                                    else:
+                                        douyin_logger.warning('[-] 15秒内未找到发送按钮')
+                                else:
+                                    douyin_logger.warning('[-] 15秒内未找到评论输入框')
+
+                            return self.work_url
+                        else:
+                            douyin_logger.warning('[-] 未从iframe中提取到作品ID')
+
+                        return self.work_url
+
+                    douyin_logger.info(f'[-] 第{i+1}/20次尝试，未找到iframe_wrapper，1秒后重试...')
+                    await asyncio.sleep(1)
+
+                douyin_logger.error('[-] 20秒内未能从iframe中提取作品ID')
+            else:
+                douyin_logger.error('[-] 20秒内未找到作品封面')
+
+            return None
+
+        except Exception as e:
+            douyin_logger.error(f'[-] 获取作品URL失败: {e}')
+            return None
+
+    async def check_comment_with_another_account(self, playwright, work_url, comment_text):
+        """使用另一个非异常账号检查评论是否存在，如果Cookie失效则换下一个账号"""
+        import random
+        import sqlite3
+        import uuid
+        import shutil
+
+        try:
+            douyin_logger.info('[-] 正在准备使用另一个账号检查评论...')
+
+            # 从数据库获取所有非异常的抖音账号（status=1 表示正常）
+            db_path = Path(BASE_DIR) / "db" / "database.db"
+            if not db_path.exists():
+                douyin_logger.warning('[-] 数据库文件不存在，跳过评论检查')
+                return False
+
+            with sqlite3.connect(db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                # type=3 表示抖音，status=1 表示正常（非异常）
+                cursor.execute('SELECT id, filePath, userName FROM user_info WHERE type = 3 AND status = 1')
+                rows = cursor.fetchall()
+
+            if not rows:
+                douyin_logger.warning('[-] 未找到任何正常的抖音账号，跳过评论检查')
+                return False
+
+            # 排除当前账号（通过 filePath 匹配）
+            current_cookie_path = str(Path(self.account_file).resolve())
+            other_accounts = [row for row in rows if str(Path(BASE_DIR) / "cookiesFile" / row['filePath']).replace('\\', '/') != current_cookie_path.replace('\\', '/')]
+
+            if not other_accounts:
+                douyin_logger.warning('[-] 未找到其他正常的抖音账号，跳过评论检查')
+                return False
+
+            # 随机打乱账号顺序
+            random.shuffle(other_accounts)
+            douyin_logger.info(f'[-] 找到 {len(other_accounts)} 个可用账号，将依次尝试')
+
+            # 遍历所有可用账号
+            for account_index, selected_account in enumerate(other_accounts):
+                douyin_logger.info(f'[-] 正在尝试第 {account_index + 1}/{len(other_accounts)} 个账号: {selected_account["userName"]} (ID: {selected_account["id"]})')
+
+                # 获取 cookie 文件路径
+                cookie_file = Path(BASE_DIR) / "cookiesFile" / selected_account['filePath']
+                if not cookie_file.exists():
+                    douyin_logger.warning(f'[-] Cookie文件不存在: {cookie_file}，尝试下一个账号')
+                    continue
+
+                # 使用唯一的临时目录，避免旧数据干扰
+                unique_id = str(uuid.uuid4())[:8]
+                user_data_dir = Path(BASE_DIR) / "browser_data" / f"douyin_check_{unique_id}"
+                user_data_dir.mkdir(parents=True, exist_ok=True)
+
+                context = None
+                try:
+                    launch_kwargs = {
+                        "user_data_dir": str(user_data_dir),
+                        "headless": False
+                    }
+                    if self.local_executable_path:
+                        launch_kwargs["executable_path"] = self.local_executable_path
+
+                    context = await playwright.chromium.launch_persistent_context(**launch_kwargs)
+                    context = await set_init_script(context)
+
+                    # 先清除可能存在的旧 cookie，再加载新账号的 cookie
+                    await context.clear_cookies()
+
+                    # 加载选中账号的 cookie
+                    with open(cookie_file, 'r', encoding='utf-8') as f:
+                        state = json.load(f)
+                    if 'cookies' not in state:
+                        douyin_logger.warning(f'[-] Cookie 文件中没有 cookies 数据，尝试下一个账号')
+                        await context.close()
+                        continue
+
+                    await context.add_cookies(state['cookies'])
+                    douyin_logger.info(f'[-] 已加载账号 {selected_account["userName"]} 的 Cookie')
+
+                    page = await context.new_page()
+
+                    # 打开作品页面
+                    douyin_logger.info(f'[-] 正在打开作品页面: {work_url}')
+                    await page.goto(work_url, wait_until="domcontentloaded", timeout=60000)
+                    await asyncio.sleep(3)
+
+                    # 检测登录状态 - 10秒检测时长，每秒检测一次
+                    douyin_logger.info('[-] 正在检测登录状态...')
+                    login_required = False
+                    for i in range(10):
+                        try:
+                            login_prompt = page.locator('div.mV5mWhEp:has-text("登录后免费畅享高清视频")').first
+                            if await login_prompt.count() > 0:
+                                douyin_logger.warning(f'[-] 第{i+1}次检测，发现登录提示，该 Cookie 已失效')
+                                login_required = True
+                                break
+                        except Exception as e:
+                            douyin_logger.debug(f'[-] 第{i+1}次检测登录状态失败: {e}')
+                        await asyncio.sleep(1)
+
+                    if login_required:
+                        douyin_logger.warning(f'[-] 账号 {selected_account["userName"]} Cookie 已失效，尝试下一个账号')
+                        await context.close()
+                        continue
+
+                    douyin_logger.info('[+] 登录状态正常，继续评论检测')
+
+                    # 评论检测循环 - 最多10次刷新重试
+                    comment_found = False
+                    max_retry_times = 10
+
+                    for retry in range(max_retry_times):
+                        douyin_logger.info(f'[-] ===== 第 {retry + 1}/{max_retry_times} 轮评论检测 =====')
+
+                        # 点击评论按钮 - 15秒检测时长，每秒检测一次
+                        douyin_logger.info('[-] 正在查找评论按钮...')
+                        comment_btn_found = False
+                        for i in range(15):
+                            try:
+                                comment_btn = page.locator('div.cxpsBymd.kNtvycrk').first
+                                if await comment_btn.count() > 0:
+                                    await comment_btn.click()
+                                    douyin_logger.info(f'[+] 第{i+1}次尝试，成功点击评论按钮')
+                                    comment_btn_found = True
+                                    break
+                            except Exception as e:
+                                douyin_logger.debug(f'[-] 第{i+1}次点击评论按钮失败: {e}')
+                            await asyncio.sleep(1)
+
+                        if not comment_btn_found:
+                            douyin_logger.warning(f'[-] 第 {retry + 1} 轮：15秒内未找到评论按钮')
+                            # 刷新页面继续下一轮
+                            douyin_logger.info(f'[-] 刷新页面，准备第 {retry + 2} 轮检测...')
+                            await page.reload(wait_until="domcontentloaded", timeout=60000)
+                            await asyncio.sleep(3)
+                            continue
+
+                        await asyncio.sleep(2)
+
+                        # 查找评论 - 15秒检测时长，每秒检测一次
+                        douyin_logger.info(f'[-] 正在查找评论内容: {comment_text}')
+
+                        for i in range(15):
+                            try:
+                                # 查找所有评论项
+                                comment_items = page.locator('div.Vrj4Q3zT.fiDvPS80')
+                                count = await comment_items.count()
+
+                                if count > 0:
+                                    douyin_logger.info(f'[-] 第{i+1}次尝试，找到 {count} 条评论')
+
+                                    for j in range(count):
+                                        try:
+                                            item = comment_items.nth(j)
+                                            # 获取评论文本内容 - 排除作者名称（有 xtTwhlGw class 的是作者名）
+                                            comment_content = item.locator('span.arnSiSbK:not(.xtTwhlGw)').first
+                                            if await comment_content.count() > 0:
+                                                text = await comment_content.inner_text()
+                                                douyin_logger.info(f'[-] 评论 {j+1}: {text[:50]}...' if len(text) > 50 else f'[-] 评论 {j+1}: {text}')
+
+                                                # 检查是否匹配
+                                                if comment_text in text:
+                                                    douyin_logger.success(f'[+] ✅ 找到匹配的评论！内容: {text}')
+                                                    comment_found = True
+                                                    break
+                                        except Exception as e:
+                                            douyin_logger.debug(f'[-] 解析评论 {j+1} 失败: {e}')
+                                            continue
+
+                                    if comment_found:
+                                        break
+                                else:
+                                    douyin_logger.info(f'[-] 第{i+1}/15次尝试，暂未找到评论，等待1秒后重试...')
+
+                            except Exception as e:
+                                douyin_logger.debug(f'[-] 第 {i+1} 次查找评论失败: {e}')
+
+                            await asyncio.sleep(1)
+
+                        if comment_found:
+                            break
+
+                        # 本轮未找到评论，刷新页面继续下一轮
+                        if retry < max_retry_times - 1:
+                            douyin_logger.warning(f'[-] 第 {retry + 1} 轮未找到评论，刷新页面重试...')
+                            await page.reload(wait_until="domcontentloaded", timeout=60000)
+                            await asyncio.sleep(3)
+
+                    if comment_found:
+                        douyin_logger.success('[+] 评论检测完成，评论已成功发布！')
+                        await context.close()
+                        return True
+                    else:
+                        douyin_logger.warning(f'[-] ❌ {max_retry_times} 轮检测后仍未找到匹配的评论: {comment_text}')
+                        await context.close()
+                        return False
+
+                except Exception as e:
+                    douyin_logger.error(f'[-] 使用账号 {selected_account["userName"]} 检测失败: {e}')
+                    if context:
+                        try:
+                            await context.close()
+                        except:
+                            pass
+                finally:
+                    # 清理临时目录
+                    try:
+                        if user_data_dir.exists():
+                            shutil.rmtree(user_data_dir, ignore_errors=True)
+                    except:
+                        pass
+
+            # 所有账号都试过了，没有可用的
+            douyin_logger.warning('[-] 所有账号的 Cookie 都已失效，无法进行评论检测')
+            return False
+
+        except Exception as e:
+            douyin_logger.error(f'[-] 检查评论失败: {e}')
+            return False
 
     async def handle_upload_error(self, page):
         douyin_logger.info('图片出错了，重新上传中')
@@ -202,28 +550,38 @@ class DouYinImage(object):
     async def upload(self, playwright: Playwright) -> None:
         try:
             # 使用 Chromium 浏览器启动一个浏览器实例
-            # 为每个实例创建独立的用户数据目录
-            temp_dir = tempfile.mkdtemp(prefix="douyin_image_browser_")
+            # 使用固定的用户数据目录，避免每次被认为是新设备
+            # 从 account_file 中提取账号名作为目录名
+            account_name = Path(self.account_file).stem  # 获取文件名（不含扩展名）
+            user_data_dir = Path(BASE_DIR) / "browser_data" / f"douyin_{account_name}"
+            user_data_dir.mkdir(parents=True, exist_ok=True)
+
+            douyin_logger.info(f'[-] 使用浏览器数据目录: {user_data_dir}')
+            if douyin_logger_patchright:
+                douyin_logger.info('[-] 使用 patchright 模式（反检测增强）')
+            else:
+                douyin_logger.warning('[-] 未安装 patchright，使用普通 playwright 模式')
+
             context = None
             if self.local_executable_path:
                 context = await playwright.chromium.launch_persistent_context(
-                    user_data_dir=temp_dir,
+                    user_data_dir=str(user_data_dir),
                     headless=False,
                     executable_path=self.local_executable_path
                 )
             else:
                 context = await playwright.chromium.launch_persistent_context(
-                    user_data_dir=temp_dir,
+                    user_data_dir=str(user_data_dir),
                     headless=False
                 )
-        
+
             # 加载cookie
             if os.path.exists(self.account_file):
                 with open(self.account_file, 'r', encoding='utf-8') as f:
                     cookies = json.load(f)
                     if 'cookies' in cookies:
                         await context.add_cookies(cookies['cookies'])
-        
+
             context = await set_init_script(context)
 
             # 创建一个新的页面
@@ -498,7 +856,7 @@ class DouYinImage(object):
             # 持续监听发布成功
             douyin_logger.info('[-] 正在等待发布结果...')
             success = False
-            for _ in range(50):  # 10秒，每0.2秒检查一次
+            for _ in range(100):  # 10秒，每0.2秒检查一次
                 try:
                     # 检查发布成功提示
                     toast = page.locator('span.semi-toast-content-text:has-text("发布成功")')
@@ -514,18 +872,28 @@ class DouYinImage(object):
                 douyin_logger.error('[-] 10秒内未检测到发布成功提示')
                 raise Exception("发布失败：10秒内未检测到成功提示")
 
+            # 如果有评论内容，使用另一个账号检查评论是否存在
+            if self.comment:
+                # 发布成功后获取作品URL
+                work_url = await self.get_work_url_from_manage_page(page)
+                if work_url:
+                    douyin_logger.success(f'[+] 作品发布成功，作品链接: {work_url}')
+
+                    douyin_logger.info('[-] 开始使用另一个账号检查评论...')
+                    await self.check_comment_with_another_account(playwright, work_url, self.comment)
+                else:
+                    douyin_logger.warning('[-] 未能获取作品URL，保持页面打开以便调试...')
+                    # 保持页面打开，等待用户手动查看
+                    douyin_logger.info('[-] 页面保持打开状态，请手动查看元素，按Ctrl+C退出')
+                    await asyncio.sleep(3600)  # 等待1小时，保持页面打开
+
             await context.storage_state(path=self.account_file)  # 保存cookie
             douyin_logger.success('[-] cookie更新完毕！')
             await asyncio.sleep(2)
         finally:
             if context:
                 await context.close()
-            # 清理临时目录
-            try:
-                if temp_dir and os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-            except:
-                pass
+            # 不再删除用户数据目录，保持浏览器状态以便下次使用
 
     async def set_location(self, page: Page, location: str = ""):
         if not location:

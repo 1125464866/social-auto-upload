@@ -151,7 +151,7 @@ def get_all_images(folder_path):
 async def main():
     # 配置参数
     folder_path = Path("D:\C盘转移\新言初小红书_言初咨询_17-05-47")  # 图片文件夹路径
-    account_file = Path(BASE_DIR / "cookies" / "douyin_uploader" / "account.json")
+    account_file = Path(BASE_DIR / "cookies" / "douyin_uploader" / "514e757b-1f6f-11f1-be5e-c8b29bdea94e.json")
     
     # 检查cookie是否有效
     if not await douyin_setup(account_file, handle=True):
@@ -204,7 +204,8 @@ async def main():
         account_file=account_file,
         productLink="",
         productTitle="",
-        music_name="唯一"  # 可以在这里设置背景音乐名称，如"轻音乐"、"钢琴曲"等
+        music_name="唯一",  # 可以在这里设置背景音乐名称，如"轻音乐"、"钢琴曲"等
+        comment="测试"  # 新增评论参数
     )
     
     try:
