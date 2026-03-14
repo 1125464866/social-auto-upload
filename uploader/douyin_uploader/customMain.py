@@ -294,9 +294,9 @@ class DouYinImage(object):
 
                 douyin_logger.info('[+] 登录状态正常，继续评论检测')
 
-                # 评论检测循环 - 最多10次刷新重试
+                # 评论检测循环 - 最多6次刷新重试
                 comment_found = False
-                max_retry_times = 10
+                max_retry_times = 6
                 comment_prefix = comment_text[:2] if len(comment_text) >= 2 else comment_text
                 douyin_logger.info(f'[-] 开始评论检测，最多{max_retry_times}轮，匹配前缀: {comment_prefix}')
 
