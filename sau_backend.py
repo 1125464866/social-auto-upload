@@ -922,7 +922,8 @@ def publish_douyin_image():
         
         # 可选参数
         title = data.get('title', '')  # 标题（可选，留空则从文件夹读取）
-        copywriter = data.get('copywriter', '')  # 文案（可选，留空则从文件夹读取）
+        copywriter = data.get('copywriter', '')  # 文案/作品描述（可选，留空则从文件夹读取）
+        comment = data.get('comment', '')  # 评论内容（可选，发布后在评论区发布）
         music_name = data.get('music_name', '')
         music_type = data.get('music_type', 'search')  # search或fav
         publish_type = data.get('publish_type', 'immediate')
@@ -990,7 +991,7 @@ def publish_douyin_image():
                 # 创建上传实例
                 douyin_image = DouYinImage(
                     title=final_title,
-                    description=description,
+                    description=description,  # 作品描述（文案）
                     file_path=valid_images,
                     tags=tags,
                     publish_date=publish_date,
@@ -998,9 +999,10 @@ def publish_douyin_image():
                     productLink="",
                     productTitle="",
                     music_name=music_name,
-                    music_type=music_type
+                    music_type=music_type,
+                    comment=comment if comment else ""  # 评论内容（发布后在评论区发布）
                 )
-                
+
                 # 执行上传
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
@@ -1009,19 +1011,24 @@ def publish_douyin_image():
 
                 print("抖音图文发布成功，准备回调 Java 服务...")
 
+                # 获取评论状态
+                dy_comment_status = "成功" if douyin_image.comment_result else "失败"
+                print(f"评论状态: {dy_comment_status}")
+
                 # 发布成功，回调通知 Java 服务
                 try:
                     callback_response = requests.post(callback_url, json={
                         "task_id": task_id,
                         "status": 1,
                         "message": "发布成功",
-                        "dyPushTime": dy_push_time
+                        "dyPushTime": dy_push_time,
+                        "dyCommentStatus": dy_comment_status
                     }, timeout=10)
                     print(f"回调成功: {callback_response.status_code}, {callback_response.text}")
                 except Exception as callback_error:
                     print(f"回调 Java 服务失败: {str(callback_error)}")
                     print(f"回调 URL: {callback_url}")
-                    print(f"回调数据: task_id={task_id}, status=1")
+                    print(f"回调数据: task_id={task_id}, status=1, dyCommentStatus={dy_comment_status}")
 
             except Exception as e:
                 print(f"抖音图文发布失败: {str(e)}")
@@ -1034,13 +1041,14 @@ def publish_douyin_image():
                         "task_id": task_id,
                         "status": 2,
                         "message": f"发布失败: {str(e)}",
-                        "dyPushTime": dy_push_time
+                        "dyPushTime": dy_push_time,
+                        "dyCommentStatus": "失败"  # 发布失败时评论状态也是失败
                     }, timeout=10)
                     print(f"失败回调成功: {callback_response.status_code}, {callback_response.text}")
                 except Exception as callback_error:
                     print(f"失败回调 Java 服务失败: {str(callback_error)}")
                     print(f"回调 URL: {callback_url}")
-                    print(f"回调数据: task_id={task_id}, status=2")
+                    print(f"回调数据: task_id={task_id}, status=2, dyCommentStatus=失败")
         
         # 启动后台线程
         thread = threading.Thread(target=publish_task, daemon=True)
