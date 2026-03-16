@@ -71,18 +71,38 @@ class DouYinImage(object):
             await page.reload()
             await asyncio.sleep(3)
 
-            # 循环等待并点击第一个作品封面区域，最多等待20秒
+            # 循环等待并点击第一个非置顶的作品封面区域，最多等待20秒
             video_cover_found = False
             for i in range(20):
-                video_cover = page.locator('div.video-card-cover-xx9wyS').first
-                if await video_cover.count() > 0:
-                    await video_cover.click()
-                    douyin_logger.info(f'[+] 第{i+1}次尝试，成功点击第一个作品封面')
-                    video_cover_found = True
-                    break
+                # 获取所有作品封面
+                video_covers = page.locator('div.video-card-cover-xx9wyS')
+                cover_count = await video_covers.count()
+
+                if cover_count > 0:
+                    # 遍历所有作品，找到第一个不包含"置顶"标签的
+                    found_non_pinned = False
+                    for j in range(cover_count):
+                        cover = video_covers.nth(j)
+                        # 检查该作品是否包含"置顶"标签
+                        pinned_tag = cover.locator('span.badge-top-mEOJIK:has-text("置顶")')
+                        if await pinned_tag.count() > 0:
+                            douyin_logger.info(f'[-] 第{j+1}个作品是置顶作品，跳过')
+                            continue
+
+                        # 找到非置顶作品，点击它
+                        await cover.click()
+                        douyin_logger.info(f'[+] 第{i+1}次尝试，成功点击第{j+1}个作品封面（非置顶）')
+                        video_cover_found = True
+                        found_non_pinned = True
+                        break
+
+                    if found_non_pinned:
+                        break
+                    else:
+                        douyin_logger.info(f'[-] 第{i+1}/20次尝试，所有作品都是置顶的，1秒后重试...')
                 else:
                     douyin_logger.info(f'[-] 第{i+1}/20次尝试，未找到作品封面，1秒后重试...')
-                    await asyncio.sleep(1)
+                await asyncio.sleep(1)
 
             if video_cover_found:
                 await asyncio.sleep(2)
