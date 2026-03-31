@@ -12,6 +12,7 @@ from pathlib import Path
 from queue import Queue
 from flask_cors import CORS
 from datetime import datetime
+import logging
 
 # 尝试使用 patchright，如果不存在则回退到 playwright
 try:
@@ -38,6 +39,47 @@ CORS(app)
 
 # 限制上传文件大小为160MB
 app.config['MAX_CONTENT_LENGTH'] = 160 * 1024 * 1024
+
+
+def setup_publish_error_logger():
+    """设置发布错误日志记录器，每天生成一个日志文件"""
+    log_dir = Path(BASE_DIR) / "log"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # 日志文件名格式：publish_error_YYYY-MM-DD.log
+    log_filename = log_dir / f"publish_error_{datetime.now().strftime('%Y-%m-%d')}.log"
+
+    # 创建 logger
+    logger = logging.getLogger('publish_error_logger')
+    logger.setLevel(logging.ERROR)
+
+    # 避免重复添加 handler
+    if not logger.handlers:
+        # 创建文件 handler
+        file_handler = logging.FileHandler(log_filename, encoding='utf-8')
+        file_handler.setLevel(logging.ERROR)
+
+        # 设置日志格式：时间 - 账号：失败原因
+        formatter = logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        file_handler.setFormatter(formatter)
+
+        logger.addHandler(file_handler)
+
+    return logger
+
+
+def log_publish_error(account_name: str, error_msg: str):
+    """记录发布错误日志
+
+    Args:
+        account_name: 账号名称
+        error_msg: 失败原因
+    """
+    try:
+        logger = setup_publish_error_logger()
+        logger.error(f"{account_name}：{error_msg}")
+    except Exception as e:
+        print(f"记录日志失败: {str(e)}")
 
 
 async def open_douyin_creator_center(cookie_file_path: str):
@@ -1034,6 +1076,10 @@ def publish_douyin_image():
                 print(f"抖音图文发布失败: {str(e)}")
                 import traceback
                 traceback.print_exc()
+
+                # 记录发布错误日志
+                account_name = Path(account_file).stem  # 从账号文件名提取账号名
+                log_publish_error(account_name, str(e))
 
                 # 发布失败，回调通知 Java 服务
                 try:
