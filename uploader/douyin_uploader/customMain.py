@@ -671,7 +671,7 @@ class DouYinImage(object):
         
             # 点击"发布图文"选项卡
             douyin_logger.info("[-] 正在寻找发布图文选项卡...")
-            
+
             # 多种可能的选择器来定位"发布图文"
             image_text_selectors = [
                 'text="发布图文"',
@@ -681,31 +681,48 @@ class DouYinImage(object):
                 'div:has-text("发布图文")',
                 'span:has-text("发布图文")'
             ]
-            
+
             tab_found = False
-            for attempt in range(60):  # 最多尝试60次，每次间隔0.5秒
-                for selector in image_text_selectors:
-                    try:
-                        tab_element = page.locator(selector)
-                        if await tab_element.count() > 0:
-                            await tab_element.click()
-                            await asyncio.sleep(2)
-                            douyin_logger.info(f"[+] 成功点击发布图文选项卡 (选择器: {selector})")
-                            tab_found = True
-                            break
-                    except Exception as e:
-                        douyin_logger.debug(f"[-] 发布图文选择器 {selector} 失败: {e}")
-                        continue
-                
+            max_refresh_times = 2  # 最多刷新2次
+            max_attempts_per_round = 20  # 每轮最多尝试20次
+
+            for refresh_round in range(max_refresh_times + 1):  # 共3轮（0,1,2）
+                round_name = f"第{refresh_round + 1}轮" if refresh_round > 0 else "首轮"
+                douyin_logger.info(f"[-] {round_name}尝试查找发布图文选项卡...")
+
+                for attempt in range(max_attempts_per_round):
+                    for selector in image_text_selectors:
+                        try:
+                            tab_element = page.locator(selector)
+                            if await tab_element.count() > 0:
+                                await tab_element.click()
+                                await asyncio.sleep(2)
+                                douyin_logger.info(f"[+] 成功点击发布图文选项卡 (选择器: {selector})")
+                                tab_found = True
+                                break
+                        except Exception as e:
+                            douyin_logger.debug(f"[-] 发布图文选择器 {selector} 失败: {e}")
+                            continue
+
+                    if tab_found:
+                        break
+
+                    douyin_logger.debug(f"[-] {round_name}第 {attempt + 1} 次尝试未找到发布图文选项卡，等待0.5秒后重试...")
+                    await asyncio.sleep(0.5)
+
                 if tab_found:
                     break
-                
-                douyin_logger.debug(f"[-] 第 {attempt + 1} 次尝试未找到发布图文选项卡，等待0.5秒后重试...")
-                await asyncio.sleep(0.5)
-            
+
+                # 本轮未找到，如果不是最后一轮则刷新页面
+                if refresh_round < max_refresh_times:
+                    douyin_logger.warning(f"[-] {round_name}未找到发布图文选项卡，正在刷新页面...")
+                    await page.reload(wait_until="domcontentloaded", timeout=60000)
+                    await asyncio.sleep(3)
+                    douyin_logger.info(f"[-] 页面已刷新，准备第{refresh_round + 2}轮尝试...")
+
             if not tab_found:
-                douyin_logger.error("[-] 未找到发布图文选项卡")
-                raise Exception("未找到发布图文选项卡")
+                douyin_logger.error("[-] 3轮尝试后仍未找到发布图文选项卡，发布失败")
+                raise Exception("未找到发布图文选项卡，请检查浏览器是否正常打开")
             
             douyin_logger.info("[-] 成功进入发布图文流程")
             
