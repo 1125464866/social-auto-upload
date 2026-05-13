@@ -337,8 +337,18 @@ class DouYinImage(object):
                             douyin_logger.warning('[-] 用户已手动关闭浏览器，终止评论检测')
                             return False
                         try:
-                            comment_btn = page.locator('div.cxpsBymd.kNtvycrk').first
-                            if await comment_btn.count() > 0:
+                            # 用文本匹配评论按钮，兼容动态class名
+                            comment_btn_selectors = [
+                                'div[class*="ADcQ"] div:has-text("评论")',
+                                'div:has-text("评论(")',
+                            ]
+                            comment_btn = None
+                            for selector in comment_btn_selectors:
+                                loc = page.locator(selector).first
+                                if await loc.count() > 0:
+                                    comment_btn = loc
+                                    break
+                            if comment_btn:
                                 await comment_btn.click()
                                 douyin_logger.info(f'[+] 第{i+1}次尝试，成功点击评论按钮')
                                 comment_btn_found = True
