@@ -933,6 +933,16 @@ class DouYinImage(object):
                 douyin_logger.error(f'[-] 点击发布按钮失败: {str(e)}')
                 raise
         
+            # 处理可能出现的"添加声明"弹窗，点击"直接发布"
+            try:
+                direct_publish_btn = page.locator('button:has-text("直接发布")')
+                if await direct_publish_btn.count() > 0:
+                    await direct_publish_btn.click()
+                    douyin_logger.info('[-] 检测到添加声明弹窗，已点击直接发布')
+                    await asyncio.sleep(1)
+            except Exception as e:
+                douyin_logger.debug(f'[-] 检查添加声明弹窗: {e}')
+
             # 持续监听发布成功
             douyin_logger.info('[-] 正在等待发布结果...')
             success = False
