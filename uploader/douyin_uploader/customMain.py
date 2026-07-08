@@ -229,228 +229,231 @@ class DouYinImage(object):
                 douyin_logger.warning('[-] 未找到其他正常的抖音账号，跳过评论检查')
                 return False
 
-            # 随机选择一个账号
-            selected_account = random.choice(other_accounts)
-            douyin_logger.info(f'[-] 随机选择账号: {selected_account["userName"]} (ID: {selected_account["id"]})')
+            # 随机打乱账号顺序，依次尝试
+            random.shuffle(other_accounts)
+            # 记录已尝试且 Cookie 失效的账号
+            failed_accounts = []
 
-            # 获取 cookie 文件路径
-            cookie_file = Path(BASE_DIR) / "cookiesFile" / selected_account['filePath']
-            if not cookie_file.exists():
-                douyin_logger.warning(f'[-] Cookie文件不存在: {cookie_file}')
-                return False
+            for selected_account in other_accounts:
+                douyin_logger.info(f'[-] 尝试使用账号: {selected_account["userName"]} (ID: {selected_account["id"]})')
 
-            # 使用唯一的临时目录，避免旧数据干扰
-            unique_id = str(uuid.uuid4())[:8]
-            user_data_dir = Path(BASE_DIR) / "browser_data" / f"douyin_check_{unique_id}"
-            user_data_dir.mkdir(parents=True, exist_ok=True)
+                # 获取 cookie 文件路径
+                cookie_file = Path(BASE_DIR) / "cookiesFile" / selected_account['filePath']
+                if not cookie_file.exists():
+                    douyin_logger.warning(f'[-] Cookie文件不存在: {cookie_file}，跳过该账号')
+                    failed_accounts.append(selected_account["userName"])
+                    continue
 
-            # 用户是否手动关闭了浏览器的标志
-            user_closed_browser = False
+                # 使用唯一的临时目录，避免旧数据干扰
+                unique_id = str(uuid.uuid4())[:8]
+                user_data_dir = Path(BASE_DIR) / "browser_data" / f"douyin_check_{unique_id}"
+                user_data_dir.mkdir(parents=True, exist_ok=True)
 
-            context = None
-            page = None
-            try:
-                launch_kwargs = {
-                    "user_data_dir": str(user_data_dir),
-                    "headless": False
-                }
-                if self.local_executable_path:
-                    launch_kwargs["executable_path"] = self.local_executable_path
+                # 区分代码主动关闭和用户手动关闭
+                user_closed_browser = False
+                code_closed_browser = False
 
-                context = await playwright.chromium.launch_persistent_context(**launch_kwargs)
-                context = await set_init_script(context)
+                context = None
+                page = None
+                try:
+                    launch_kwargs = {
+                        "user_data_dir": str(user_data_dir),
+                        "headless": False
+                    }
+                    if self.local_executable_path:
+                        launch_kwargs["executable_path"] = self.local_executable_path
 
-                # 监听浏览器关闭事件
-                async def on_context_close():
-                    nonlocal user_closed_browser
-                    user_closed_browser = True
-                    douyin_logger.warning('[-] 检测到用户手动关闭了浏览器')
+                    context = await playwright.chromium.launch_persistent_context(**launch_kwargs)
+                    context = await set_init_script(context)
 
-                context.on("close", lambda: asyncio.create_task(on_context_close()))
+                    # 监听浏览器关闭事件（仅当非代码主动关闭时才标记为用户关闭）
+                    async def on_context_close():
+                        nonlocal user_closed_browser, code_closed_browser
+                        if not code_closed_browser:
+                            user_closed_browser = True
+                            douyin_logger.warning('[-] 检测到用户手动关闭了浏览器')
 
-                # 先清除可能存在的旧 cookie，再加载新账号的 cookie
-                await context.clear_cookies()
+                    context.on("close", lambda: asyncio.create_task(on_context_close()))
 
-                # 加载选中账号的 cookie
-                with open(cookie_file, 'r', encoding='utf-8') as f:
-                    state = json.load(f)
-                if 'cookies' not in state:
-                    douyin_logger.warning(f'[-] Cookie 文件中没有 cookies 数据')
-                    await context.close()
-                    return False
+                    # 先清除可能存在的旧 cookie，再加载新账号的 cookie
+                    await context.clear_cookies()
 
-                await context.add_cookies(state['cookies'])
-                douyin_logger.info(f'[-] 已加载账号 {selected_account["userName"]} 的 Cookie')
-
-                page = await context.new_page()
-
-                # 打开作品页面
-                douyin_logger.info(f'[-] 正在打开作品页面: {work_url}')
-                await page.goto(work_url, wait_until="domcontentloaded", timeout=60000)
-                await asyncio.sleep(3)
-
-                # 检测登录状态 - 10秒检测时长，每秒检测一次
-                douyin_logger.info('[-] 正在检测登录状态...')
-                login_required = False
-                for i in range(10):
-                    # 检查用户是否关闭了浏览器
-                    if user_closed_browser:
-                        douyin_logger.warning('[-] 用户已手动关闭浏览器，终止评论检测')
-                        return False
-                    try:
-                        login_prompt = page.locator('div.mV5mWhEp:has-text("登录后免费畅享高清视频")').first
-                        if await login_prompt.count() > 0:
-                            douyin_logger.warning(f'[-] 第{i+1}次检测，发现登录提示，该 Cookie 已失效')
-                            login_required = True
-                            break
-                    except Exception as e:
-                        douyin_logger.debug(f'[-] 第{i+1}次检测登录状态失败: {e}')
-                    await asyncio.sleep(1)
-
-                if login_required:
-                    douyin_logger.warning(f'[-] 账号 {selected_account["userName"]} Cookie 已失效')
-                    await context.close()
-                    return False
-
-                douyin_logger.info('[+] 登录状态正常，继续评论检测')
-
-                # 评论检测循环 - 最多10次刷新重试
-                comment_found = False
-                max_retry_times = 10
-                comment_prefix = comment_text[:2] if len(comment_text) >= 2 else comment_text
-                douyin_logger.info(f'[-] 开始评论检测，最多{max_retry_times}轮，匹配前缀: {comment_prefix}')
-
-                for retry in range(max_retry_times):
-                    # 检查用户是否关闭了浏览器
-                    if user_closed_browser:
-                        douyin_logger.warning('[-] 用户已手动关闭浏览器，终止评论检测')
-                        return False
-
-                    douyin_logger.info(f'[-] ===== 第 {retry + 1}/{max_retry_times} 轮评论检测 =====')
-
-                    # 点击评论按钮 - 15秒检测时长，每秒检测一次
-                    douyin_logger.info('[-] 正在查找评论按钮...')
-                    comment_btn_found = False
-                    for i in range(15):
-                        # 检查用户是否关闭了浏览器
-                        if user_closed_browser:
-                            douyin_logger.warning('[-] 用户已手动关闭浏览器，终止评论检测')
-                            return False
-                        try:
-                            # 用文本匹配评论按钮，兼容动态class名
-                            comment_btn_selectors = [
-                                'div[class*="ADcQ"] div:has-text("评论")',
-                                'div:has-text("评论(")',
-                            ]
-                            comment_btn = None
-                            for selector in comment_btn_selectors:
-                                loc = page.locator(selector).first
-                                if await loc.count() > 0:
-                                    comment_btn = loc
-                                    break
-                            if comment_btn:
-                                await comment_btn.click()
-                                douyin_logger.info(f'[+] 第{i+1}次尝试，成功点击评论按钮')
-                                comment_btn_found = True
-                                break
-                        except Exception as e:
-                            douyin_logger.debug(f'[-] 第{i+1}次点击评论按钮失败: {e}')
-                        await asyncio.sleep(1)
-
-                    if not comment_btn_found:
-                        douyin_logger.warning(f'[-] 第 {retry + 1} 轮：15秒内未找到评论按钮')
-                        # 刷新页面继续下一轮
-                        if retry < max_retry_times - 1:
-                            douyin_logger.info(f'[-] 刷新页面，准备第 {retry + 2} 轮检测...')
-                            await page.reload(wait_until="domcontentloaded", timeout=60000)
-                            await asyncio.sleep(3)
+                    # 加载选中账号的 cookie
+                    with open(cookie_file, 'r', encoding='utf-8') as f:
+                        state = json.load(f)
+                    if 'cookies' not in state:
+                        douyin_logger.warning(f'[-] Cookie 文件中没有 cookies 数据，跳过该账号')
+                        code_closed_browser = True
+                        await context.close()
+                        failed_accounts.append(selected_account["userName"])
                         continue
 
-                    await asyncio.sleep(2)
+                    await context.add_cookies(state['cookies'])
+                    douyin_logger.info(f'[-] 已加载账号 {selected_account["userName"]} 的 Cookie')
 
-                    # 查找评论 - 10秒检测时长，每秒检测一次
+                    page = await context.new_page()
+
+                    # 打开作品页面
+                    douyin_logger.info(f'[-] 正在打开作品页面: {work_url}')
+                    await page.goto(work_url, wait_until="domcontentloaded", timeout=60000)
+                    await asyncio.sleep(3)
+
+                    # 检测登录状态 - 10秒检测时长，每秒检测一次
+                    douyin_logger.info('[-] 正在检测登录状态...')
+                    login_required = False
                     for i in range(10):
-                        # 检查用户是否关闭了浏览器
+                        if user_closed_browser:
+                            douyin_logger.warning('[-] 用户已手动关闭浏览器，终止评论检测')
+                            return False
+                        try:
+                            login_prompt = page.locator('div.mV5mWhEp:has-text("登录后免费畅享高清视频")').first
+                            if await login_prompt.count() > 0:
+                                douyin_logger.warning(f'[-] 第{i+1}次检测，发现登录提示，该 Cookie 已失效')
+                                login_required = True
+                                break
+                        except Exception as e:
+                            douyin_logger.debug(f'[-] 第{i+1}次检测登录状态失败: {e}')
+                        await asyncio.sleep(1)
+
+                    if login_required:
+                        douyin_logger.warning(f'[-] 账号 {selected_account["userName"]} Cookie 已失效，尝试下一个账号...')
+                        code_closed_browser = True
+                        await context.close()
+                        failed_accounts.append(selected_account["userName"])
+                        continue
+
+                    douyin_logger.info('[+] 登录状态正常，继续评论检测')
+
+                    # 评论检测循环 - 最多10次刷新重试
+                    comment_found = False
+                    max_retry_times = 10
+                    comment_prefix = comment_text[:2] if len(comment_text) >= 2 else comment_text
+                    douyin_logger.info(f'[-] 开始评论检测，最多{max_retry_times}轮，匹配前缀: {comment_prefix}')
+
+                    for retry in range(max_retry_times):
                         if user_closed_browser:
                             douyin_logger.warning('[-] 用户已手动关闭浏览器，终止评论检测')
                             return False
 
-                        try:
-                            # 查找所有评论项
-                            comment_items = page.locator('div.Vrj4Q3zT.fiDvPS80')
-                            count = await comment_items.count()
+                        douyin_logger.info(f'[-] ===== 第 {retry + 1}/{max_retry_times} 轮评论检测 =====')
 
-                            if count > 0:
-                                douyin_logger.info(f'[-] 第{i+1}次尝试，找到 {count} 条评论')
-
-                                for j in range(count):
-                                    try:
-                                        item = comment_items.nth(j)
-                                        # 获取评论文本内容 - 排除作者名称（有 xtTwhlGw class 的是作者名）
-                                        comment_content = item.locator('span.arnSiSbK:not(.xtTwhlGw)').first
-                                        if await comment_content.count() > 0:
-                                            text = await comment_content.inner_text()
-                                            if len(text) > 50:
-                                                douyin_logger.info(f'[-] 评论 {j+1}: {text[:50]}...')
-                                            else:
-                                                douyin_logger.info(f'[-] 评论 {j+1}: {text}')
-
-                                            # 检查是否匹配 - 只匹配前两个字符
-                                            if comment_prefix in text:
-                                                douyin_logger.success(f'[+] ✅ 找到匹配的评论！内容: {text}')
-                                                comment_found = True
-                                                break
-                                    except Exception as e:
-                                        douyin_logger.debug(f'[-] 解析评论 {j+1} 失败: {e}')
-                                        continue
-
-                                if comment_found:
+                        # 点击评论按钮 - 15秒检测时长，每秒检测一次
+                        douyin_logger.info('[-] 正在查找评论按钮...')
+                        comment_btn_found = False
+                        for i in range(15):
+                            if user_closed_browser:
+                                douyin_logger.warning('[-] 用户已手动关闭浏览器，终止评论检测')
+                                return False
+                            try:
+                                # 用XPath匹配自身文本含"评论("的元素，排除"暂无评论"等干扰
+                                comment_btn = page.locator('xpath=//*[contains(text(), "评论(")]').first
+                                if await comment_btn.count() > 0:
+                                    await comment_btn.click()
+                                    douyin_logger.info(f'[+] 第{i+1}次尝试，成功点击评论按钮')
+                                    comment_btn_found = True
                                     break
-                            else:
-                                douyin_logger.info(f'[-] 第{i+1}/15次尝试，暂未找到评论，等待1秒后重试...')
+                            except Exception as e:
+                                douyin_logger.debug(f'[-] 第{i+1}次点击评论按钮失败: {e}')
+                            await asyncio.sleep(1)
 
-                        except Exception as e:
-                            douyin_logger.debug(f'[-] 第 {i+1} 次查找评论失败: {e}')
+                        if not comment_btn_found:
+                            douyin_logger.warning(f'[-] 第 {retry + 1} 轮：15秒内未找到评论按钮')
+                            if retry < max_retry_times - 1:
+                                douyin_logger.info(f'[-] 刷新页面，准备第 {retry + 2} 轮检测...')
+                                await page.reload(wait_until="domcontentloaded", timeout=60000)
+                                await asyncio.sleep(3)
+                            continue
 
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(2)
+
+                        # 查找评论 - 10秒检测时长，每秒检测一次
+                        for i in range(10):
+                            if user_closed_browser:
+                                douyin_logger.warning('[-] 用户已手动关闭浏览器，终止评论检测')
+                                return False
+
+                            try:
+                                # 查找所有评论项
+                                comment_items = page.locator('div.Vrj4Q3zT.fiDvPS80')
+                                count = await comment_items.count()
+
+                                if count > 0:
+                                    douyin_logger.info(f'[-] 第{i+1}次尝试，找到 {count} 条评论')
+
+                                    for j in range(count):
+                                        try:
+                                            item = comment_items.nth(j)
+                                            # 获取评论文本内容 - 排除作者名称（有 xtTwhlGw class 的是作者名）
+                                            comment_content = item.locator('span.arnSiSbK:not(.xtTwhlGw)').first
+                                            if await comment_content.count() > 0:
+                                                text = await comment_content.inner_text()
+                                                if len(text) > 50:
+                                                    douyin_logger.info(f'[-] 评论 {j+1}: {text[:50]}...')
+                                                else:
+                                                    douyin_logger.info(f'[-] 评论 {j+1}: {text}')
+
+                                                if comment_prefix in text:
+                                                    douyin_logger.success(f'[+] ✅ 找到匹配的评论！内容: {text}')
+                                                    comment_found = True
+                                                    break
+                                        except Exception as e:
+                                            douyin_logger.debug(f'[-] 解析评论 {j+1} 失败: {e}')
+                                            continue
+
+                                    if comment_found:
+                                        break
+                                else:
+                                    douyin_logger.info(f'[-] 第{i+1}/15次尝试，暂未找到评论，等待1秒后重试...')
+
+                            except Exception as e:
+                                douyin_logger.debug(f'[-] 第 {i+1} 次查找评论失败: {e}')
+
+                            await asyncio.sleep(1)
+
+                        if comment_found:
+                            break
+
+                        # 本轮未找到评论，刷新页面继续下一轮
+                        if retry < max_retry_times - 1:
+                            douyin_logger.warning(f'[-] 第 {retry + 1} 轮未找到评论，刷新页面重试...')
+                            await page.reload(wait_until="domcontentloaded", timeout=60000)
+                            await asyncio.sleep(3)
 
                     if comment_found:
-                        break
-
-                    # 本轮未找到评论，刷新页面继续下一轮
-                    if retry < max_retry_times - 1:
-                        douyin_logger.warning(f'[-] 第 {retry + 1} 轮未找到评论，刷新页面重试...')
-                        await page.reload(wait_until="domcontentloaded", timeout=60000)
-                        await asyncio.sleep(3)
-
-                if comment_found:
-                    douyin_logger.success('[+] 评论检测完成，评论已成功发布！')
-                    await context.close()
-                    return True
-                else:
-                    douyin_logger.warning(f'[-] {max_retry_times} 轮检测后仍未找到匹配的评论: {comment_text}')
-                    await context.close()
-                    return False
-
-            except Exception as e:
-                douyin_logger.error(f'[-] 使用账号 {selected_account["userName"]} 检测失败: {e}')
-                # 检查是否是用户手动关闭导致的错误
-                if user_closed_browser:
-                    douyin_logger.warning('[-] 用户已手动关闭浏览器，终止评论检测')
-                    return False
-                if context:
-                    try:
+                        douyin_logger.success('[+] 评论检测完成，评论已成功发布！')
+                        code_closed_browser = True
                         await context.close()
+                        return True
+                    else:
+                        douyin_logger.warning(f'[-] {max_retry_times} 轮检测后仍未找到匹配的评论: {comment_text}')
+                        code_closed_browser = True
+                        await context.close()
+                        return False
+
+                except Exception as e:
+                    douyin_logger.error(f'[-] 使用账号 {selected_account["userName"]} 检测失败: {e}')
+                    if user_closed_browser:
+                        douyin_logger.warning('[-] 用户已手动关闭浏览器，终止评论检测')
+                        return False
+                    if context:
+                        try:
+                            code_closed_browser = True
+                            await context.close()
+                        except:
+                            pass
+                    failed_accounts.append(selected_account["userName"])
+                    continue
+                finally:
+                    try:
+                        if user_data_dir.exists():
+                            shutil.rmtree(user_data_dir, ignore_errors=True)
                     except:
                         pass
-                return False
-            finally:
-                # 清理临时目录
-                try:
-                    if user_data_dir.exists():
-                        shutil.rmtree(user_data_dir, ignore_errors=True)
-                except:
-                    pass
+
+            # 所有账号都试过了
+            if failed_accounts:
+                douyin_logger.warning(f'[-] 所有账号均已尝试，Cookie失效的账号: {", ".join(failed_accounts)}')
+            return False
 
         except Exception as e:
             douyin_logger.error(f'[-] 检查评论失败: {e}')
