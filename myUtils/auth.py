@@ -17,27 +17,59 @@ async def cookie_auth_douyin(account_file):
         browser = await playwright.chromium.launch(headless=LOCAL_CHROME_HEADLESS)
         context = await browser.new_context(storage_state=account_file)
         context = await set_init_script(context)
-        # 创建一个新的页面
         page = await context.new_page()
-        # 访问指定的 URL（增加超时时间到60秒）
-        await page.goto("https://creator.douyin.com/creator-micro/content/upload", timeout=60000)
+
         try:
-            await page.wait_for_url("https://creator.douyin.com/creator-micro/content/upload", timeout=10000)
-            # 2024.06.17 抖音创作者中心改版
-            # 判断
-            # 等待“扫码登录”元素出现，超时 5 秒（如果 5 秒没出现，说明 cookie 有效）
+            await page.goto("https://creator.douyin.com/creator-micro/content/upload",
+                            timeout=60000, wait_until="domcontentloaded")
+            # 等网络空闲，确保登录浮层/内容都已渲染
             try:
-                await page.get_by_text("扫码登录").wait_for(timeout=5000)
-                douyin_logger.error("[+] cookie 失效，需要扫码登录")
-                return False
+                await page.wait_for_load_state("networkidle", timeout=15000)
             except:
+                pass
+
+            # 未登录指示器：登录/注册按钮 或 扫码登录
+            login_btn = page.locator('div[class*="douyin_login_comp_btn"]').or_(
+                page.get_by_text("登录/注册")).or_(page.get_by_text("扫码登录"))
+            # 已登录指示器：发布图文/发布视频 选项卡 或 文件上传框
+            logged_in = page.get_by_text("发布视频").or_(
+                page.get_by_text("发布图文")).or_(page.locator('input[type="file"]'))
+
+            async def wait_not_logged():
+                await login_btn.first.wait_for(state="visible", timeout=55000)
+                return False  # 出现登录按钮 → 失效
+
+            async def wait_logged():
+                await logged_in.first.wait_for(state="visible", timeout=55000)
+                return True  # 出现上传界面 → 有效
+
+            # 竞态：两种信号谁先出现谁赢，不再依赖固定超时，最多等1分钟
+            done, pending = await asyncio.wait(
+                [asyncio.create_task(wait_not_logged()),
+                 asyncio.create_task(wait_logged())],
+                return_when=asyncio.FIRST_COMPLETED,
+                timeout=60
+            )
+            for t in pending:
+                t.cancel()
+
+            if not done:
+                # 1分钟都没出现明确信号，按失效处理（保守判断）
+                douyin_logger.error("[-] 1分钟内未确定登录状态，按失效处理")
+                return False
+
+            result = done.pop().result()
+            if result:
                 douyin_logger.success("[+]  cookie 有效")
-                return True
-        except:
-            douyin_logger.error("[+] 等待5秒 cookie 失效")
+            else:
+                douyin_logger.error("[+] cookie 失效，需要扫码登录")
+            return result
+        except Exception as e:
+            douyin_logger.error(f"[+] cookie 检测异常: {e}")
+            return False
+        finally:
             await context.close()
             await browser.close()
-            return False
 
 
 async def cookie_auth_tencent(account_file):
